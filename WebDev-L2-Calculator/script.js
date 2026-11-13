@@ -1,69 +1,106 @@
 // Calculator logic. No eval(): the maths is done with our own code.
+// Bottom line = what you type (e.g. 1+2+6+7). Top line = the answer after "=".
 
-const displayEl = document.getElementById("display");
-const expressionEl = document.getElementById("expression");
+const typedEl = document.getElementById("expression");
+const resultEl = document.getElementById("result");
 
-// tokens holds finished parts of the expression, e.g. [5, "+", 3, "×"]
-let tokens = [];
-let current = "0";       // the number being typed
+const OPS = ["+", "−", "×", "÷"];
+const MAX_LENGTH = 40;
+
+let expr = "";            // everything the user has typed, as text
 let justEvaluated = false;
 let hasError = false;
 
-const OPS = ["+", "−", "×", "÷"];
-
 function render() {
-  displayEl.textContent = current;
-  displayEl.classList.toggle("error", hasError);
-  expressionEl.textContent = tokens.join(" ");
+  typedEl.textContent = expr === "" ? "0" : expr;
+  typedEl.scrollLeft = typedEl.scrollWidth; // keep the newest characters visible
 }
 
-function resetAll() {
-  tokens = [];
-  current = "0";
+function showResult(text, isError) {
+  resultEl.textContent = text;
+  resultEl.classList.toggle("error", Boolean(isError));
+}
+
+function clearResult() {
+  showResult("", false);
   justEvaluated = false;
   hasError = false;
 }
 
+function lastChar() { return expr.slice(-1); }
+function isOp(ch) { return OPS.includes(ch); }
+
+// the number currently being typed (text after the last operator)
+function currentNumber() {
+  let i = expr.length;
+  while (i > 0 && !isOp(expr[i - 1])) i--;
+  return expr.slice(i);
+}
+
 function inputNumber(digit) {
-  if (hasError || justEvaluated) resetAll();
-  if (current === "0") current = digit;
-  else if (current.length < 14) current += digit;
+  if (justEvaluated) { expr = ""; }   // start a fresh sum after an answer
+  clearResult();
+  if (expr.length >= MAX_LENGTH) return;
+  if (currentNumber() === "0") expr = expr.slice(0, -1); // avoid 007
+  expr += digit;
   render();
 }
 
 function inputDecimal() {
-  if (hasError || justEvaluated) resetAll();
-  if (!current.includes(".")) current += ".";
+  if (justEvaluated) { expr = ""; }
+  clearResult();
+  if (expr.length >= MAX_LENGTH) return;
+  const num = currentNumber();
+  if (num.includes(".")) return;      // only one dot per number
+  expr += num === "" ? "0." : ".";
   render();
 }
 
 function inputOperator(op) {
-  if (hasError) return;
   if (justEvaluated) {
-    // keep going with the result: 8 then × 2
-    tokens = [];
-    justEvaluated = false;
+    // continue from the answer: 16 then × 2
+    expr = resultEl.textContent.replace("-", "−");
   }
-  const lastIsOp = OPS.includes(tokens[tokens.length - 1]);
-  if (current === "" && lastIsOp) {
-    // user changed their mind about the operator
-    tokens[tokens.length - 1] = op;
-  } else {
-    tokens.push(parseFloat(current), op);
-    current = "";
+  clearResult();
+  if (expr === "") {
+    if (op === "−") { expr = "−"; render(); }  // allow a negative first number
+    return;
   }
+  if (expr === "−") return;
+  if (isOp(lastChar())) expr = expr.slice(0, -1) + op; // change your mind
+  else if (expr.length < MAX_LENGTH) expr += op;
   render();
-  if (current === "") displayEl.textContent = tokens[tokens.length - 2];
 }
 
 function backspace() {
-  if (hasError || justEvaluated) { resetAll(); render(); return; }
-  if (current.length > 1) current = current.slice(0, -1);
-  else current = "0";
+  // after "=", the sum stays on the bottom line so you can fix a mistake
+  clearResult();
+  expr = expr.slice(0, -1);
   render();
 }
 
-// Evaluate with correct order of operations: × and ÷ first, then + and −
+function clearAll() {
+  expr = "";
+  clearResult();
+  showResult("", false);
+  render();
+}
+
+// Turn "1+2×3" into numbers and operators: [1, "+", 2, "×", 3]
+function tokenize(text) {
+  const tokens = [];
+  let buffer = "";
+  for (const ch of text) {
+    if (isOp(ch)) {
+      if (buffer === "" && tokens.length === 0 && ch === "−") buffer = "-";
+      else { tokens.push(parseFloat(buffer), ch); buffer = ""; }
+    } else buffer += ch;
+  }
+  tokens.push(parseFloat(buffer));
+  return tokens;
+}
+
+// Order of operations: × and ÷ first, then + and −
 function calculate(list) {
   const first = [];
   for (let i = 0; i < list.length; i++) {
@@ -73,9 +110,7 @@ function calculate(list) {
       const right = list[++i];
       if (t === "÷" && right === 0) return null; // division by zero
       first.push(t === "×" ? left * right : left / right);
-    } else {
-      first.push(t);
-    }
+    } else first.push(t);
   }
   let result = first[0];
   for (let i = 1; i < first.length; i += 2) {
@@ -86,26 +121,21 @@ function calculate(list) {
 }
 
 function equals() {
-  if (hasError || justEvaluated) return;
-  if (current === "" ) current = String(tokens[tokens.length - 2]); // "5 +" then "="
-  const list = [...tokens, parseFloat(current)];
-  const result = calculate(list);
+  if (expr === "" || justEvaluated) return;
+  // ignore a trailing operator, e.g. "5+" is treated as "5"
+  while (isOp(lastChar())) expr = expr.slice(0, -1);
+  if (expr === "" || expr === "−") { expr = ""; render(); return; }
+  render();
 
-  expressionEl.textContent = list.join(" ") + " =";
+  const result = calculate(tokenize(expr));
   if (result === null) {
-    current = "Cannot divide by 0";
     hasError = true;
-    tokens = [];
-    displayEl.textContent = current;
-    displayEl.classList.add("error");
+    showResult("Cannot divide by 0", true);
     return;
   }
   // round off floating point noise like 0.1 + 0.2
-  current = String(parseFloat(result.toFixed(10)));
-  tokens = [];
+  showResult(String(parseFloat(result.toFixed(10))), false);
   justEvaluated = true;
-  displayEl.textContent = current;
-  displayEl.classList.remove("error");
 }
 
 // Event listeners (no inline onclick in the HTML)
@@ -118,7 +148,7 @@ document.querySelectorAll("[data-op]").forEach((btn) =>
 document.getElementById("decimal").addEventListener("click", inputDecimal);
 document.getElementById("equals").addEventListener("click", equals);
 document.getElementById("backspace").addEventListener("click", backspace);
-document.getElementById("clear").addEventListener("click", () => { resetAll(); render(); });
+document.getElementById("clear").addEventListener("click", clearAll);
 
 // Keyboard support (bonus)
 document.addEventListener("keydown", (e) => {
@@ -130,7 +160,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "/") { e.preventDefault(); inputOperator("÷"); }
   else if (e.key === "Enter" || e.key === "=") equals();
   else if (e.key === "Backspace") backspace();
-  else if (e.key === "Escape") { resetAll(); render(); }
+  else if (e.key === "Escape") clearAll();
 });
 
 render();
