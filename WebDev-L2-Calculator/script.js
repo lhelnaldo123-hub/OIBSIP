@@ -246,16 +246,23 @@ function moveCursorToX(x) {
   if (target !== cursor) { cursor = target; render(); }
 }
 
-// While dragging near the left or right edge, slide the line so you can keep going
+// While dragging near the left or right edge, slide the line so you can keep going.
+// The closer to the edge (or past it) your finger is, the faster it slides.
 function autoScroll() {
   if (!dragging) return;
   const box = typedEl.getBoundingClientRect();
-  const edge = 28;
-  if (dragX < box.left + edge && typedEl.scrollLeft > 0) typedEl.scrollLeft -= 8;
-  else if (dragX > box.right - edge) typedEl.scrollLeft += 8;
+  const edge = 48;
+  const fromLeft = dragX - box.left;
+  const fromRight = box.right - dragX;
+  if (fromLeft < edge) typedEl.scrollLeft -= Math.min(22, 4 + (edge - fromLeft) * 0.4);
+  else if (fromRight < edge) typedEl.scrollLeft += Math.min(22, 4 + (edge - fromRight) * 0.4);
   moveCursorToX(dragX);
   requestAnimationFrame(autoScroll);
 }
+
+// Make sure the phone treats a drag here as moving the cursor, not scrolling the page
+typedEl.style.touchAction = "none";
+typedEl.addEventListener("contextmenu", (e) => e.preventDefault()); // no pop-up menu on long press
 
 typedEl.addEventListener("pointerdown", (e) => {
   if (expr === "") return;
