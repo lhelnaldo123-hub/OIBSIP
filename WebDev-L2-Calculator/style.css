@@ -16,7 +16,9 @@
 body {
   min-height: 100vh;
   display: grid;
-  place-items: center;
+  justify-content: center;
+  align-content: center;
+  grid-template-columns: minmax(0, 460px); /* column can never grow past the screen */
   padding: 10px;
   background: var(--bg);
   font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
@@ -32,6 +34,7 @@ body {
 }
 
 .screen {
+  min-width: 0;
   height: 130px;
   margin-bottom: 18px;
   padding: 12px 14px;
@@ -47,7 +50,8 @@ body {
 
 .result {
   min-height: 28px;
-  max-width: 100%;
+  width: 100%;
+  text-align: right;
   font-family: "Courier New", monospace;
   font-size: 1.7rem;
   font-weight: 700;
@@ -58,7 +62,8 @@ body {
 .result.error { color: var(--equals); font-size: 1.1rem; }
 
 .typed {
-  max-width: 100%;
+  width: 100%;
+  text-align: right;
   font-family: "Courier New", monospace;
   font-size: 2.1rem;
   white-space: nowrap;
@@ -104,4 +109,30 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .key { transition: none; }
+}
+
+/* Tap-to-edit cursor on the typed line */
+.typed {
+  position: relative;
+  cursor: text;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.typed .placeholder { opacity: 0.45; }
+
+.caret {
+  display: inline-block;
+  width: 0;
+  height: 1.15em;
+  margin: 0 1px;
+  border-left: 2px solid var(--screen-ink);
+  vertical-align: text-bottom;
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .caret { animation: none; }
 }
