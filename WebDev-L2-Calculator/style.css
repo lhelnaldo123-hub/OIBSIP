@@ -114,7 +114,9 @@ body {
 /* Tap-to-edit cursor on the typed line */
 .typed {
   position: relative;
+  padding: 14px 0 2px; /* taller area so a finger can grab the line easily */
   cursor: text;
+  touch-action: none; /* lets you drag the cursor without the page scrolling */
   -webkit-user-select: none;
   user-select: none;
 }
