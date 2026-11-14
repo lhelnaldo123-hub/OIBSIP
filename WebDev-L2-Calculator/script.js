@@ -1,6 +1,6 @@
 // Calculator logic. No eval(): the maths is done with our own code.
 // Bottom line = what you type (e.g. 1+2+6+7). Top line = the answer after "=".
-// Tap anywhere in the typed sum to move the cursor, then delete or type there.
+// Tap anywhere in the typed sum to move the cursor, or press and drag along it, then delete or type there.
 
 const typedEl = document.getElementById("expression");
 const resultEl = document.getElementById("result");
@@ -12,10 +12,15 @@ let expr = "";            // everything the user has typed, as text
 let cursor = 0;           // where the blinking cursor is (0 = before the first character)
 let justEvaluated = false;
 
+// state for dragging the cursor with a finger or mouse
+let dragging = false;
+let dragX = 0;
+
 function isOp(ch) { return OPS.includes(ch); }
 
 // ---------- Drawing the typed line ----------
 function render() {
+  const keepScroll = typedEl.scrollLeft;
   typedEl.textContent = "";
 
   if (expr === "") {
@@ -40,7 +45,8 @@ function render() {
       typedEl.appendChild(ch);
     }
   }
-  keepCaretVisible(caret);
+  typedEl.scrollLeft = keepScroll;
+  if (!dragging) keepCaretVisible(caret);
 }
 
 function keepCaretVisible(caret) {
@@ -223,20 +229,57 @@ document.getElementById("equals").addEventListener("click", equals);
 document.getElementById("backspace").addEventListener("click", backspace);
 document.getElementById("clear").addEventListener("click", clearAll);
 
-// Tap the typed line to move the cursor: left half of a character = before it, right half = after it
-typedEl.addEventListener("click", (e) => {
-  if (expr === "") return;
-  const ch = e.target.closest(".ch");
-  if (ch) {
+// Move the cursor by tapping, or by pressing and dragging along the typed line.
+// The cursor goes to whichever gap between characters is closest to your finger.
+function cursorFromX(x) {
+  let count = 0;
+  for (const ch of typedEl.querySelectorAll(".ch")) {
     const box = ch.getBoundingClientRect();
-    const index = Number(ch.dataset.index);
-    cursor = e.clientX < box.left + box.width / 2 ? index : index + 1;
-  } else {
-    cursor = expr.length; // tapped empty space: go to the end
+    if (x > box.left + box.width / 2) count++;
+    else break;
   }
+  return count;
+}
+
+function moveCursorToX(x) {
+  const target = cursorFromX(x);
+  if (target !== cursor) { cursor = target; render(); }
+}
+
+// While dragging near the left or right edge, slide the line so you can keep going
+function autoScroll() {
+  if (!dragging) return;
+  const box = typedEl.getBoundingClientRect();
+  const edge = 28;
+  if (dragX < box.left + edge && typedEl.scrollLeft > 0) typedEl.scrollLeft -= 8;
+  else if (dragX > box.right - edge) typedEl.scrollLeft += 8;
+  moveCursorToX(dragX);
+  requestAnimationFrame(autoScroll);
+}
+
+typedEl.addEventListener("pointerdown", (e) => {
+  if (expr === "") return;
+  typedEl.setPointerCapture(e.pointerId);
+  dragging = true;
+  dragX = e.clientX;
   justEvaluated = false; // now we are editing, not starting a new sum
-  render();
+  moveCursorToX(dragX);
+  requestAnimationFrame(autoScroll);
 });
+
+typedEl.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  dragX = e.clientX;
+  moveCursorToX(dragX);
+});
+
+function stopDragging() {
+  if (!dragging) return;
+  dragging = false;
+  render();
+}
+typedEl.addEventListener("pointerup", stopDragging);
+typedEl.addEventListener("pointercancel", stopDragging);
 
 // Keyboard support (bonus)
 document.addEventListener("keydown", (e) => {
