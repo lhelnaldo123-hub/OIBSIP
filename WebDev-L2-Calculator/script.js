@@ -1,5 +1,6 @@
 // Calculator logic. No eval(): the maths is done with our own code.
 // Bottom line = what you type (e.g. 1+2+6+7). Top line = the answer after "=".
+// Tap anywhere in the typed sum to move the cursor, then delete or type there.
 
 const typedEl = document.getElementById("expression");
 const resultEl = document.getElementById("result");
@@ -8,12 +9,49 @@ const OPS = ["+", "−", "×", "÷"];
 const MAX_LENGTH = 40;
 
 let expr = "";            // everything the user has typed, as text
+let cursor = 0;           // where the blinking cursor is (0 = before the first character)
 let justEvaluated = false;
-let hasError = false;
 
+function isOp(ch) { return OPS.includes(ch); }
+
+// ---------- Drawing the typed line ----------
 function render() {
-  typedEl.textContent = expr === "" ? "0" : expr;
-  typedEl.scrollLeft = typedEl.scrollWidth; // keep the newest characters visible
+  typedEl.textContent = "";
+
+  if (expr === "") {
+    const placeholder = document.createElement("span");
+    placeholder.className = "placeholder";
+    placeholder.textContent = "0";
+    typedEl.appendChild(placeholder);
+    typedEl.scrollLeft = 0;
+    return;
+  }
+
+  // every character gets its own span so it can be tapped
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  for (let i = 0; i <= expr.length; i++) {
+    if (i === cursor) typedEl.appendChild(caret);
+    if (i < expr.length) {
+      const ch = document.createElement("span");
+      ch.className = "ch";
+      ch.textContent = expr[i];
+      ch.dataset.index = i;
+      typedEl.appendChild(ch);
+    }
+  }
+  keepCaretVisible(caret);
+}
+
+function keepCaretVisible(caret) {
+  if (cursor === expr.length) {
+    typedEl.scrollLeft = typedEl.scrollWidth; // newest characters on the right
+    return;
+  }
+  const left = caret.offsetLeft;
+  const view = typedEl.clientWidth;
+  if (left < typedEl.scrollLeft + 20) typedEl.scrollLeft = Math.max(0, left - 20);
+  else if (left > typedEl.scrollLeft + view - 20) typedEl.scrollLeft = left - view + 20;
 }
 
 function showResult(text, isError) {
@@ -24,35 +62,44 @@ function showResult(text, isError) {
 function clearResult() {
   showResult("", false);
   justEvaluated = false;
-  hasError = false;
 }
 
-function lastChar() { return expr.slice(-1); }
-function isOp(ch) { return OPS.includes(ch); }
-
-// the number currently being typed (text after the last operator)
-function currentNumber() {
-  let i = expr.length;
-  while (i > 0 && !isOp(expr[i - 1])) i--;
-  return expr.slice(i);
+// ---------- Editing helpers ----------
+function insertText(text) {
+  expr = expr.slice(0, cursor) + text + expr.slice(cursor);
+  cursor += text.length;
 }
 
+// start and end of the number the cursor is inside
+function numberBounds() {
+  let start = cursor;
+  while (start > 0 && !isOp(expr[start - 1])) start--;
+  let end = cursor;
+  while (end < expr.length && !isOp(expr[end])) end++;
+  return [start, end];
+}
+
+// ---------- Button actions ----------
 function inputNumber(digit) {
-  if (justEvaluated) { expr = ""; }   // start a fresh sum after an answer
+  if (justEvaluated) { expr = ""; cursor = 0; } // start a fresh sum after an answer
   clearResult();
   if (expr.length >= MAX_LENGTH) return;
-  if (currentNumber() === "0") expr = expr.slice(0, -1); // avoid 007
-  expr += digit;
+  const [start, end] = numberBounds();
+  if (expr.slice(start, end) === "0" && cursor === end) {
+    expr = expr.slice(0, start) + expr.slice(end); // replace a lone 0 (avoid 007)
+    cursor = start;
+  }
+  insertText(digit);
   render();
 }
 
 function inputDecimal() {
-  if (justEvaluated) { expr = ""; }
+  if (justEvaluated) { expr = ""; cursor = 0; }
   clearResult();
   if (expr.length >= MAX_LENGTH) return;
-  const num = currentNumber();
-  if (num.includes(".")) return;      // only one dot per number
-  expr += num === "" ? "0." : ".";
+  const [start, end] = numberBounds();
+  if (expr.slice(start, end).includes(".")) return; // only one dot per number
+  insertText(cursor === start ? "0." : ".");
   render();
 }
 
@@ -60,32 +107,53 @@ function inputOperator(op) {
   if (justEvaluated) {
     // continue from the answer: 16 then × 2
     expr = resultEl.textContent.replace("-", "−");
+    cursor = expr.length;
   }
   clearResult();
-  if (expr === "") {
-    if (op === "−") { expr = "−"; render(); }  // allow a negative first number
+
+  if (expr === "" || cursor === 0) {
+    // the only thing allowed at the very start is a minus (negative number)
+    if (op === "−" && !isOp(expr[0]) && expr.length < MAX_LENGTH) { insertText("−"); render(); }
     return;
   }
-  if (expr === "−") return;
-  if (isOp(lastChar())) expr = expr.slice(0, -1) + op; // change your mind
-  else if (expr.length < MAX_LENGTH) expr += op;
+
+  const before = expr[cursor - 1];
+  const after = expr[cursor];
+  if (cursor - 1 === 0 && before === "−") return;  // leading minus: nothing to replace
+  if (isOp(before)) {
+    expr = expr.slice(0, cursor - 1) + op + expr.slice(cursor);   // change your mind
+  } else if (isOp(after)) {
+    expr = expr.slice(0, cursor) + op + expr.slice(cursor + 1);   // swap the operator ahead
+    cursor++;
+  } else if (expr.length < MAX_LENGTH) {
+    insertText(op);
+  }
   render();
 }
 
 function backspace() {
-  // after "=", the sum stays on the bottom line so you can fix a mistake
   clearResult();
-  expr = expr.slice(0, -1);
+  if (cursor > 0) {
+    expr = expr.slice(0, cursor - 1) + expr.slice(cursor); // delete the character before the cursor
+    cursor--;
+  }
+  render();
+}
+
+function deleteForward() {
+  clearResult();
+  expr = expr.slice(0, cursor) + expr.slice(cursor + 1);
   render();
 }
 
 function clearAll() {
   expr = "";
+  cursor = 0;
   clearResult();
-  showResult("", false);
   render();
 }
 
+// ---------- Maths ----------
 // Turn "1+2×3" into numbers and operators: [1, "+", 2, "×", 3]
 function tokenize(text) {
   const tokens = [];
@@ -122,14 +190,19 @@ function calculate(list) {
 
 function equals() {
   if (expr === "" || justEvaluated) return;
-  // ignore a trailing operator, e.g. "5+" is treated as "5"
-  while (isOp(lastChar())) expr = expr.slice(0, -1);
-  if (expr === "" || expr === "−") { expr = ""; render(); return; }
+  // ignore trailing operators, e.g. "5+" is treated as "5"
+  while (isOp(expr[expr.length - 1])) expr = expr.slice(0, -1);
+  cursor = expr.length;
+  if (expr === "" || expr === "−") { expr = ""; cursor = 0; render(); return; }
   render();
 
-  const result = calculate(tokenize(expr));
+  const tokens = tokenize(expr);
+  if (tokens.some((t) => typeof t === "number" && Number.isNaN(t))) {
+    showResult("Invalid expression", true);  // e.g. "2+×3" after editing
+    return;
+  }
+  const result = calculate(tokens);
   if (result === null) {
-    hasError = true;
     showResult("Cannot divide by 0", true);
     return;
   }
@@ -138,7 +211,7 @@ function equals() {
   justEvaluated = true;
 }
 
-// Event listeners (no inline onclick in the HTML)
+// ---------- Event listeners (no inline onclick in the HTML) ----------
 document.querySelectorAll("[data-num]").forEach((btn) =>
   btn.addEventListener("click", () => inputNumber(btn.dataset.num))
 );
@@ -150,6 +223,21 @@ document.getElementById("equals").addEventListener("click", equals);
 document.getElementById("backspace").addEventListener("click", backspace);
 document.getElementById("clear").addEventListener("click", clearAll);
 
+// Tap the typed line to move the cursor: left half of a character = before it, right half = after it
+typedEl.addEventListener("click", (e) => {
+  if (expr === "") return;
+  const ch = e.target.closest(".ch");
+  if (ch) {
+    const box = ch.getBoundingClientRect();
+    const index = Number(ch.dataset.index);
+    cursor = e.clientX < box.left + box.width / 2 ? index : index + 1;
+  } else {
+    cursor = expr.length; // tapped empty space: go to the end
+  }
+  justEvaluated = false; // now we are editing, not starting a new sum
+  render();
+});
+
 // Keyboard support (bonus)
 document.addEventListener("keydown", (e) => {
   if (e.key >= "0" && e.key <= "9") inputNumber(e.key);
@@ -160,7 +248,10 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "/") { e.preventDefault(); inputOperator("÷"); }
   else if (e.key === "Enter" || e.key === "=") equals();
   else if (e.key === "Backspace") backspace();
+  else if (e.key === "Delete") deleteForward();
   else if (e.key === "Escape") clearAll();
+  else if (e.key === "ArrowLeft") { justEvaluated = false; cursor = Math.max(0, cursor - 1); render(); }
+  else if (e.key === "ArrowRight") { justEvaluated = false; cursor = Math.min(expr.length, cursor + 1); render(); }
 });
 
 render();
