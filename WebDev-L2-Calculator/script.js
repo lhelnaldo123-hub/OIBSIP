@@ -1,12 +1,14 @@
 // Calculator logic. No eval(): the maths is done with our own code.
 // Bottom line = what you type (e.g. 1+2+6+7). Top line = the answer after "=".
 // Tap anywhere in the typed sum to move the cursor, or press and drag along it, then delete or type there.
+// Long sums shrink to fit the screen; if still too long, the line slides sideways.
 
 const typedEl = document.getElementById("expression");
 const resultEl = document.getElementById("result");
 
 const OPS = ["+", "−", "×", "÷"];
 const MAX_LENGTH = 40;
+const MIN_FONT = 14;     // smallest text size (px) before the line starts sliding
 
 let expr = "";            // everything the user has typed, as text
 let cursor = 0;           // where the blinking cursor is (0 = before the first character)
@@ -19,6 +21,16 @@ let dragX = 0;
 function isOp(ch) { return OPS.includes(ch); }
 
 // ---------- Drawing the typed line ----------
+// Shrink the text step by step until it fits the screen (never smaller than minPx)
+function fitText(el, minPx) {
+  el.style.fontSize = "";                                  // back to the size from the CSS file
+  let size = parseFloat(getComputedStyle(el).fontSize);
+  while (el.scrollWidth > el.clientWidth + 1 && size > minPx) {
+    size -= 1;
+    el.style.fontSize = size + "px";
+  }
+}
+
 function render() {
   const keepScroll = typedEl.scrollLeft;
   typedEl.textContent = "";
@@ -28,6 +40,7 @@ function render() {
     placeholder.className = "placeholder";
     placeholder.textContent = "0";
     typedEl.appendChild(placeholder);
+    fitText(typedEl, MIN_FONT);
     typedEl.scrollLeft = 0;
     return;
   }
@@ -45,6 +58,7 @@ function render() {
       typedEl.appendChild(ch);
     }
   }
+  fitText(typedEl, MIN_FONT);
   typedEl.scrollLeft = keepScroll;
   if (!dragging) keepCaretVisible(caret);
 }
@@ -63,6 +77,7 @@ function keepCaretVisible(caret) {
 function showResult(text, isError) {
   resultEl.textContent = text;
   resultEl.classList.toggle("error", Boolean(isError));
+  fitText(resultEl, MIN_FONT);
 }
 
 function clearResult() {
