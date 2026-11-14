@@ -114,7 +114,7 @@ body {
 /* Tap-to-edit cursor on the typed line */
 .typed {
   position: relative;
-  padding: 14px 0 2px; /* taller area so a finger can grab the line easily */
+  padding: 12px 0 14px; /* taller area so a finger can grab the line easily */
   cursor: text;
   touch-action: none; /* lets you drag the cursor without the page scrolling */
   -webkit-user-select: none;
@@ -130,7 +130,20 @@ body {
   margin: 0 1px;
   border-left: 2px solid var(--screen-ink);
   vertical-align: text-bottom;
+  position: relative;
   animation: blink 1s steps(1) infinite;
+}
+
+/* small round handle under the cursor: press and drag it */
+.caret::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 100%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--screen-ink);
 }
 
 @keyframes blink { 50% { opacity: 0; } }
