@@ -60,6 +60,14 @@ function Photo({ src, alt, cls }) {
   return <img className={cls} src={src} alt={alt} loading="lazy" onError={() => setBad(true)} />;
 }
 
+/* Ingredient photo with emoji fallback */
+function IngImg({ item, cls }) {
+  const [bad, setBad] = useState(false);
+  const src = window.ING_IMG && window.ING_IMG[item.name];
+  if (!src || bad) return <div className={cls}>{iconFor(item)}</div>;
+  return <img className={cls} src={src} alt={item.name} loading="lazy" onError={() => setBad(true)} />;
+}
+
 /* ---------- Header / Footer ---------- */
 function Header({ user, cartCount, logout }) {
   return (
@@ -152,10 +160,10 @@ function Chatbot() {
   return (
     <div>
       {open && (
-        <div className="bot">
+        <div className="botbox">
           <div className="bot-head"><span>🍕 Pizzabot</span><button onClick={() => setOpen(false)}>✕</button></div>
           <div className="bot-msgs">
-            {msgs.map((m, i) => <div key={i} className={"bubble " + m.from}>{m.text}</div>)}
+            {msgs.map((m, i) => <div key={i} className={"bubble " + (m.from === "bot" ? "fromBot" : "me")}>{m.text}</div>)}
             <div ref={end} />
           </div>
           <div className="chips">{chips.map((c) => <button key={c} onClick={() => send(c)}>{c}</button>)}</div>
@@ -323,7 +331,7 @@ function Menu({ opts, addToCart, name }) {
       <div className="strip">
         {(window.GALLERY || []).map((g, i) => <Photo key={i} src={g} alt="Pizza" />)}
       </div>
-      <div className="wrap" id="menu-list">
+      <div className="wrap wide" id="menu-list">
         <div className="how">
           <div><b>🍕</b><strong>1. Choose</strong>Pick a favourite or build your own</div>
           <div><b>💳</b><strong>2. Pay</strong>Secure card checkout</div>
@@ -343,7 +351,7 @@ function Menu({ opts, addToCart, name }) {
             </div>
           ))}
         </div>
-        <button className="btn alt full" style={{ marginTop: 16 }} onClick={() => go("build")}>🍕 Build your own pizza</button>
+        <button className="btn alt full" style={{ marginTop: 20 }} onClick={() => go("build")}>🍕 Build your own pizza</button>
       </div>
     </div>
   );
@@ -379,7 +387,8 @@ function Builder({ opts, addToCart }) {
       <h2>{titles[step]}</h2>
       {list.map((i) => (
         <button key={i.id} className={"opt" + (chosen(i.id) ? " on" : "")} disabled={i.stock <= 0} onClick={() => pick(i.id)}>
-          <span>{i.name}{i.stock <= 0 ? " (sold out)" : ""}</span><span className="price">{$(i.price)}</span>
+          <span className="oname"><IngImg item={{ ...i, type: keys[step] }} cls="thumb" />{i.name}{i.stock <= 0 ? " (sold out)" : ""}</span>
+          <span className="price">{$(i.price)}</span>
         </button>
       ))}
       <div className="row" style={{ marginTop: 14 }}>
@@ -468,7 +477,7 @@ function StockRow({ item, onSaved }) {
   return (
     <div className={"icard" + (low ? " low" : "")}>
       <div className="ihead">
-        <div className="ico">{iconFor(item)}</div>
+        <IngImg item={item} cls="ico" />
         <div className="info">
           <b>{item.name}</b>{low && <span className="tag">LOW</span>}
           <div className="muted">{item.stock} in stock</div>
@@ -542,7 +551,7 @@ function Admin() {
         <h1>Kitchen <em>dashboard</em></h1>
         <p>{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })} · {SHOP.name}</p>
       </div>
-      <div className="wrap">
+      <div className="wrap wide">
         <div className="stats">
           <div className="stat"><i>🧾</i><b>{orders.length}</b><span>Paid orders</span></div>
           <div className="stat"><i>🔥</i><b>{kitchen}</b><span>In kitchen</span></div>
@@ -558,25 +567,27 @@ function Admin() {
         {tab === "orders" && (
           <div>
             {orders.length === 0 && <p className="empty">🍕 No paid orders yet.<br />New orders will appear here.</p>}
-            {orders.map((o) => {
-              const si = STATUSES.indexOf(o.status) + 1;
-              const first = o.pizzas[0] ? o.pizzas[0].name : "";
-              return (
-                <div className={"ocard s" + si} key={o._id}>
-                  <div className="ohead">
-                    <Photo src={imgFor(first)} alt={first} />
-                    <div className="info">
-                      <div className="row"><b>{o.user ? o.user.name : "Customer"}</b><span className="price">{$(o.total)}</span></div>
-                      <p className="muted">{o.user && o.user.email}</p>
-                      <p className="muted">{new Date(o.createdAt).toLocaleString()}</p>
-                      <span className="sbadge">{o.status}</span>
+            <div className="agrid">
+              {orders.map((o) => {
+                const si = STATUSES.indexOf(o.status) + 1;
+                const first = o.pizzas[0] ? o.pizzas[0].name : "";
+                return (
+                  <div className={"ocard s" + si} key={o._id}>
+                    <div className="ohead">
+                      <Photo src={imgFor(first)} alt={first} />
+                      <div className="info">
+                        <div className="row"><b>{o.user ? o.user.name : "Customer"}</b><span className="price">{$(o.total)}</span></div>
+                        <p className="muted">{o.user && o.user.email}</p>
+                        <p className="muted">{new Date(o.createdAt).toLocaleString()}</p>
+                        <span className="sbadge">{o.status}</span>
+                      </div>
                     </div>
+                    {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
+                    <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
                   </div>
-                  {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
-                  <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -585,7 +596,9 @@ function Admin() {
             {groups.map(([type, title]) => (
               <div key={type}>
                 <h3>{title}</h3>
-                {inv.filter((i) => i.type === type).map((i) => <StockRow key={i._id} item={i} onSaved={loadInv} />)}
+                <div className="igrid">
+                  {inv.filter((i) => i.type === type).map((i) => <StockRow key={i._id} item={i} onSaved={loadInv} />)}
+                </div>
               </div>
             ))}
           </div>
