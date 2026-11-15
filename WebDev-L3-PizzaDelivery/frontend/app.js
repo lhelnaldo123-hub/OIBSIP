@@ -9,6 +9,10 @@ const imgFor = (name) => (window.PIZZA_IMG && window.PIZZA_IMG[name]) || window.
 /* ---- Change these to your real details ---- */
 const SHOP = { name: "Slice & Co.", phone: "+233 20 000 0000", email: "help@sliceandco.com", address: "12 Market Street, Accra", hours: "Open daily 10am – 11pm" };
 
+const TYPE_ICON = { base: "🍞", sauce: "🥫", cheese: "🧀", veggie: "🥬" };
+const NAME_ICON = { Mushroom: "🍄", Onion: "🧅", "Bell Pepper": "🫑", Olives: "🫒", Sweetcorn: "🌽", Tomato: "🍅", "Tomato Basil": "🍅", BBQ: "🍖", Pesto: "🌿", "White Garlic": "🧄", "Spicy Arrabbiata": "🌶️", "Cheese Burst": "🧀", "Gluten Free": "🌾", "Whole Wheat": "🌾" };
+const iconFor = (i) => NAME_ICON[i.name] || TYPE_ICON[i.type] || "🍕";
+
 async function call(path, method = "GET", body, key = "pizza_token") {
   const headers = { "Content-Type": "application/json" };
   const t = localStorage.getItem(key);
@@ -456,20 +460,26 @@ function StockRow({ item, onSaved }) {
   const [v, setV] = useState(item.stock);
   const [m, setM] = useState("");
   const low = item.stock < LOW_LIMIT;
+  const pct = Math.max(2, Math.min(100, item.stock));
   const save = () =>
     A("/api/admin/inventory/" + item._id, "PUT", { stock: v })
       .then(() => { setM("Saved ✓"); onSaved(); })
       .catch((e) => setM(e.message));
   return (
-    <div className={"card" + (low ? " low" : "")}>
-      <div className="row">
-        <div>
+    <div className={"icard" + (low ? " low" : "")}>
+      <div className="ihead">
+        <div className="ico">{iconFor(item)}</div>
+        <div className="info">
           <b>{item.name}</b>{low && <span className="tag">LOW</span>}
           <div className="muted">{item.stock} in stock</div>
         </div>
-        <div style={{ width: 110 }}><input type="number" min="0" value={v} onChange={(e) => setV(e.target.value)} style={{ marginBottom: 0 }} /></div>
       </div>
-      <div className="row" style={{ marginTop: 8 }}><span className="muted">{m}</span><button className="btn" onClick={save}>Save</button></div>
+      <div className="sbar"><i style={{ width: pct + "%" }}></i></div>
+      <div className="iedit">
+        <input type="number" min="0" value={v} onChange={(e) => setV(e.target.value)} />
+        <button className="btn" onClick={save}>Save</button>
+      </div>
+      {m && <p className="muted" style={{ marginTop: 6 }}>{m}</p>}
     </div>
   );
 }
@@ -506,7 +516,7 @@ function Admin() {
 
   if (!authed)
     return (
-      <div className="authbg">
+      <div className="authbg" style={{ minHeight: "100vh", backgroundImage: "linear-gradient(rgba(20,8,5,.65),rgba(20,8,5,.8)), url(" + (window.HERO_IMG || "") + ")" }}>
         <div className="auth">
           <h1>🔒 Admin login</h1>
           <form onSubmit={login}>
@@ -523,17 +533,21 @@ function Admin() {
   const kitchen = orders.filter((o) => o.status === "In Kitchen").length;
   const delivery = orders.filter((o) => o.status === "Sent to Delivery").length;
   const lowCount = inv.filter((i) => i.stock < LOW_LIMIT).length;
-  const groups = [["base", "Pizza bases"], ["sauce", "Sauces"], ["cheese", "Cheeses"], ["veggie", "Vegetables"]];
+  const groups = [["base", "🍞 Pizza bases"], ["sauce", "🥫 Sauces"], ["cheese", "🧀 Cheeses"], ["veggie", "🥬 Vegetables"]];
 
   return (
     <div className="admin">
       <div className="top"><b>🍕 Admin panel</b><nav><button className="pill" onClick={out}>Log out</button></nav></div>
+      <div className="ahero" style={{ backgroundImage: "url(" + window.HERO_IMG + ")" }}>
+        <h1>Kitchen <em>dashboard</em></h1>
+        <p>{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })} · {SHOP.name}</p>
+      </div>
       <div className="wrap">
         <div className="stats">
-          <div className="stat"><b>{orders.length}</b><span>Paid orders</span></div>
-          <div className="stat"><b>{kitchen}</b><span>In kitchen</span></div>
-          <div className="stat"><b>{delivery}</b><span>Out for delivery</span></div>
-          <div className={"stat" + (lowCount ? " warn" : "")}><b>{lowCount}</b><span>Low stock</span></div>
+          <div className="stat"><i>🧾</i><b>{orders.length}</b><span>Paid orders</span></div>
+          <div className="stat"><i>🔥</i><b>{kitchen}</b><span>In kitchen</span></div>
+          <div className="stat"><i>🛵</i><b>{delivery}</b><span>Out for delivery</span></div>
+          <div className={"stat" + (lowCount ? " warn" : "")}><i>⚠️</i><b>{lowCount}</b><span>Low stock</span></div>
         </div>
         <Msg m={err} />
         <div className="tabs">
@@ -543,15 +557,26 @@ function Admin() {
 
         {tab === "orders" && (
           <div>
-            {orders.length === 0 && <p className="empty">No paid orders yet.</p>}
-            {orders.map((o) => (
-              <div className="card" key={o._id}>
-                <div className="row"><b>{o.user ? o.user.name : "Customer"}</b><span className="price">{$(o.total)}</span></div>
-                <p className="muted">{o.user && o.user.email} · {new Date(o.createdAt).toLocaleString()}</p>
-                {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
-                <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
-              </div>
-            ))}
+            {orders.length === 0 && <p className="empty">🍕 No paid orders yet.<br />New orders will appear here.</p>}
+            {orders.map((o) => {
+              const si = STATUSES.indexOf(o.status) + 1;
+              const first = o.pizzas[0] ? o.pizzas[0].name : "";
+              return (
+                <div className={"ocard s" + si} key={o._id}>
+                  <div className="ohead">
+                    <Photo src={imgFor(first)} alt={first} />
+                    <div className="info">
+                      <div className="row"><b>{o.user ? o.user.name : "Customer"}</b><span className="price">{$(o.total)}</span></div>
+                      <p className="muted">{o.user && o.user.email}</p>
+                      <p className="muted">{new Date(o.createdAt).toLocaleString()}</p>
+                      <span className="sbadge">{o.status}</span>
+                    </div>
+                  </div>
+                  {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
+                  <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
+                </div>
+              );
+            })}
           </div>
         )}
 
