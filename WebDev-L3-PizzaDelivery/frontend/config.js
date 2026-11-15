@@ -1,1 +1,1 @@
-window.API_URL = "https://YOUR-RENDER-NAME.onrender.com";
+window.API_URL = "https://oibsip-p3ut.onrender.com";
