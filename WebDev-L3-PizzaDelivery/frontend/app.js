@@ -6,12 +6,16 @@ const LOW_LIMIT = 20;
 const go = (h) => { location.hash = h; };
 const imgFor = (name) => (window.PIZZA_IMG && window.PIZZA_IMG[name]) || window.DEFAULT_IMG;
 
+const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo (DRC)","Congo (Republic)","Costa Rica","Côte d'Ivoire","Croatia","Cuba","Cyprus","Czechia","Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","São Tomé and Príncipe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe","Other"];
+
 /* ---- Change these to your real details ---- */
 const SHOP = { name: "Slice & Co.", phone: "+233 20 000 0000", email: "help@sliceandco.com", address: "12 Market Street, Accra", hours: "Open daily 10am – 11pm" };
 
 const TYPE_ICON = { base: "🍞", sauce: "🥫", cheese: "🧀", veggie: "🥬" };
 const NAME_ICON = { Mushroom: "🍄", Onion: "🧅", "Bell Pepper": "🫑", Olives: "🫒", Sweetcorn: "🌽", Tomato: "🍅", "Tomato Basil": "🍅", BBQ: "🍖", Pesto: "🌿", "White Garlic": "🧄", "Spicy Arrabbiata": "🌶️", "Cheese Burst": "🧀", "Gluten Free": "🌾", "Whole Wheat": "🌾" };
 const iconFor = (i) => NAME_ICON[i.name] || TYPE_ICON[i.type] || "🍕";
+
+const place = (dl) => [dl.address, dl.area, dl.country].filter(Boolean).join(", ");
 
 async function call(path, method = "GET", body, key = "pizza_token") {
   const headers = { "Content-Type": "application/json" };
@@ -60,7 +64,6 @@ function Photo({ src, alt, cls }) {
   return <img className={cls} src={src} alt={alt} loading="lazy" onError={() => setBad(true)} />;
 }
 
-/* Ingredient photo with emoji fallback */
 function IngImg({ item, cls }) {
   const [bad, setBad] = useState(false);
   const src = window.ING_IMG && window.ING_IMG[item.name];
@@ -128,7 +131,7 @@ function Footer() {
 const RULES = [
   [/hello|hi\b|hey|good (morning|afternoon|evening)/, "Hi! 👋 I'm Pizzabot. Ask me about our menu, delivery, payment or your order."],
   [/hour|open|close|time/, SHOP.hours + "."],
-  [/deliver|how long|arrive|late|where is my/, "Delivery usually takes 30–45 minutes. Track your order live under Orders: it shows Order Received → In Kitchen → Sent to Delivery."],
+  [/deliver|how long|arrive|late|where is my|area|location|country/, "Delivery usually takes 30–45 minutes. In the cart, choose your country, enter your city or area and your address before paying. Track your order under Orders."],
   [/pay|card|stripe|price|cost|cash/, "You pay securely by card at checkout. This site runs in test mode, so use card 4242 4242 4242 4242, any future date and any 3 digits. No real money is charged."],
   [/vegan|vegetarian|veg\b|gluten|allerg/, "We have Vegan Cheese and a Gluten Free base. Use Build to pick them. For serious allergies please call " + SHOP.phone + "."],
   [/custom|build|own|topping|base|sauce|cheese/, "Tap Build in the menu bar: choose a base, sauce, cheese, then any vegetables."],
@@ -186,6 +189,7 @@ function Support() {
   const faqs = [
     ["How long does delivery take?", "Usually 30–45 minutes. Track it live under Orders."],
     ["How do I pay?", "By card at checkout. This demo uses Stripe test mode: card 4242 4242 4242 4242."],
+    ["Where do you deliver?", "Choose your country, enter your city or area and write your street address or landmark in the cart before paying."],
     ["Can I make my own pizza?", "Yes! Tap Build and choose a base, sauce, cheese and vegetables."],
     ["Do you have vegan or gluten-free options?", "Yes: Vegan Cheese and a Gluten Free base."],
     ["I forgot my password.", "On the login page tap 'Forgot password?' and follow the link we send."],
@@ -401,15 +405,30 @@ function Builder({ opts, addToCart }) {
   );
 }
 
-/* ---------- Cart ---------- */
+/* ---------- Cart + delivery location (worldwide) ---------- */
 function Cart({ cart, setCart }) {
-  const { busy, msg, run } = useAsync();
-  const total = cart.reduce((a, p) => a + p.price, 0);
-  const pay = () => run(async () => {
-    const pizzas = cart.map(({ name, base, sauce, cheese, veggies }) => ({ name, base, sauce, cheese, veggies }));
-    const d = await call("/api/orders", "POST", { pizzas });
-    window.location.href = d.url;
+  const { busy, msg, setMsg, run } = useAsync();
+  const blank = { country: "", area: "", address: "", phone: "", note: "" };
+  const [d, setD] = useState(() => {
+    try { return { ...blank, ...(JSON.parse(localStorage.getItem("pizza_delivery")) || {}) }; }
+    catch (e) { return blank; }
   });
+  const setField = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  const total = cart.reduce((a, p) => a + p.price, 0);
+
+  const pay = () => {
+    if (!d.country) return setMsg({ ok: false, text: "Please choose your country." });
+    if (d.area.trim().length < 2) return setMsg({ ok: false, text: "Please enter your city or area." });
+    if (d.address.trim().length < 5) return setMsg({ ok: false, text: "Please write your street address or landmark." });
+    if (d.phone.replace(/\D/g, "").length < 7) return setMsg({ ok: false, text: "Please enter a phone number we can call (include the country code)." });
+    run(async () => {
+      localStorage.setItem("pizza_delivery", JSON.stringify(d));
+      const pizzas = cart.map(({ name, base, sauce, cheese, veggies }) => ({ name, base, sauce, cheese, veggies }));
+      const r = await call("/api/orders", "POST", { pizzas, delivery: d });
+      window.location.href = r.url;
+    });
+  };
+
   if (!cart.length) return <div className="wrap"><p className="empty">Your cart is empty.</p><button className="btn full" onClick={() => go("dashboard")}>Browse pizzas</button></div>;
   return (
     <div className="wrap">
@@ -427,6 +446,24 @@ function Cart({ cart, setCart }) {
         </div>
       ))}
       <div className="card row"><b>Total</b><span className="price">{$(total)}</span></div>
+
+      <h2 style={{ marginTop: 18 }}>📍 Delivery location</h2>
+      <div className="card">
+        <label className="muted">Country</label>
+        <select value={d.country} onChange={setField("country")}>
+          <option value="">Choose your country...</option>
+          {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <label className="muted">City / area</label>
+        <input placeholder="e.g. East Legon, Accra" value={d.area} onChange={setField("area")} />
+        <label className="muted">Street address or landmark</label>
+        <input placeholder="e.g. House 12, Oxford Street, near the bank" value={d.address} onChange={setField("address")} />
+        <label className="muted">Phone number (with country code)</label>
+        <input type="tel" placeholder="e.g. +233 24 000 0000" value={d.phone} onChange={setField("phone")} />
+        <label className="muted">Note for the rider (optional)</label>
+        <input placeholder="e.g. Call when you arrive" value={d.note} onChange={setField("note")} />
+      </div>
+
       <button className="btn full" disabled={busy} onClick={pay}>{busy ? "Opening payment..." : "Pay with Stripe (test mode)"}</button>
       <p className="muted" style={{ marginTop: 10 }}>Test card: 4242 4242 4242 4242, any future date, any 3 digits. No real money is charged.</p>
       <Msg m={msg} />
@@ -456,6 +493,7 @@ function Orders() {
           <div className="card" key={o._id}>
             <div className="row"><b>{new Date(o.createdAt).toLocaleString()}</b><span className="price">{$(o.total)}</span></div>
             {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
+            {o.delivery && o.delivery.address && <p className="muted" style={{ marginTop: 6 }}>📍 {place(o.delivery)}</p>}
             <div className="track">{STATUSES.map((s, i) => <span key={s} className={i <= idx ? "on" : ""}>{s}</span>)}</div>
           </div>
         );
@@ -571,6 +609,7 @@ function Admin() {
               {orders.map((o) => {
                 const si = STATUSES.indexOf(o.status) + 1;
                 const first = o.pizzas[0] ? o.pizzas[0].name : "";
+                const dl = o.delivery || {};
                 return (
                   <div className={"ocard s" + si} key={o._id}>
                     <div className="ohead">
@@ -582,6 +621,13 @@ function Admin() {
                         <span className="sbadge">{o.status}</span>
                       </div>
                     </div>
+                    {dl.address && (
+                      <div className="pline">
+                        📍 <b>{[dl.area, dl.country].filter(Boolean).join(", ")}</b><br />
+                        {dl.address}<br />
+                        📞 {dl.phone}{dl.note ? <span><br />📝 {dl.note}</span> : null}
+                      </div>
+                    )}
                     {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
                     <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
                   </div>
