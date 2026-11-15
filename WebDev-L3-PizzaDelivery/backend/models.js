@@ -24,6 +24,7 @@ const Order = mongoose.model("Order", new Schema({
   user: { type: Schema.Types.ObjectId, ref: "User" },
   pizzas: [{ name: String, base: String, sauce: String, cheese: String, veggies: [String], price: Number }],
   usage: [{ item: Schema.Types.ObjectId, qty: Number }],
+  delivery: { country: String, area: String, address: String, phone: String, note: String },
   total: Number,
   status: { type: String, default: "Pending Payment" },
   paid: { type: Boolean, default: false },
