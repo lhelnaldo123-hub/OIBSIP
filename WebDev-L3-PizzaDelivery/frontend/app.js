@@ -1,8 +1,12 @@
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 const API = window.API_URL.replace(/\/$/, "");
 const $ = (n) => "$" + Number(n).toFixed(2);
 const STATUSES = ["Order Received", "In Kitchen", "Sent to Delivery"];
 const go = (h) => { location.hash = h; };
+const imgFor = (name) => (window.PIZZA_IMG && window.PIZZA_IMG[name]) || window.DEFAULT_IMG;
+
+/* ---- Change these to your real details ---- */
+const SHOP = { name: "Slice & Co.", phone: "+233 20 000 0000", email: "help@sliceandco.com", address: "12 Market Street, Accra", hours: "Open daily 10am – 11pm" };
 
 async function call(path, method = "GET", body, key = "pizza_token") {
   const headers = { "Content-Type": "application/json" };
@@ -45,6 +49,158 @@ function Msg({ m }) {
   return m ? <div className={"msg " + (m.ok ? "ok" : "bad")}>{m.text}</div> : null;
 }
 
+function Photo({ src, alt, cls }) {
+  const [bad, setBad] = useState(false);
+  if (!src || bad) return <div className={"ph " + (cls || "")}>🍕</div>;
+  return <img className={cls} src={src} alt={alt} loading="lazy" onError={() => setBad(true)} />;
+}
+
+/* ---------- Header / Footer ---------- */
+function Header({ user, cartCount, logout }) {
+  return (
+    <header className="top">
+      <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
+      <nav>
+        {user ? (
+          <>
+            <a href="#dashboard">Menu</a>
+            <a href="#build">Build</a>
+            <a href="#orders">Orders</a>
+            <a href="#support">Support</a>
+            <a href="#cart">Cart<span className="badge">{cartCount}</span></a>
+            <button className="pill" onClick={logout}>Log out</button>
+          </>
+        ) : (
+          <>
+            <a href="#support">Support</a>
+            <a href="#login">Log in</a>
+            <a href="#register" className="pill">Sign up</a>
+          </>
+        )}
+      </nav>
+    </header>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="footer">
+      <div className="cols">
+        <div>
+          <h4>🍕 {SHOP.name}</h4>
+          <p>Fresh dough, real cheese, built your way and delivered hot.</p>
+        </div>
+        <div>
+          <h4>Customer service</h4>
+          <p>📞 {SHOP.phone}</p>
+          <p>✉️ {SHOP.email}</p>
+          <p>📍 {SHOP.address}</p>
+          <p>🕗 {SHOP.hours}</p>
+        </div>
+        <div>
+          <h4>Quick links</h4>
+          <a href="#dashboard">Menu</a>
+          <a href="#build">Build your pizza</a>
+          <a href="#orders">Track my order</a>
+          <a href="#support">Help &amp; FAQ</a>
+          <a href="#admin">Staff login</a>
+        </div>
+      </div>
+      <p className="copy">© {new Date().getFullYear()} {SHOP.name}. All rights reserved.</p>
+    </footer>
+  );
+}
+
+/* ---------- Chatbot ---------- */
+const RULES = [
+  [/hello|hi\b|hey|good (morning|afternoon|evening)/, "Hi! 👋 I'm Pizzabot. Ask me about our menu, delivery, payment or your order."],
+  [/hour|open|close|time/, SHOP.hours + "."],
+  [/deliver|how long|arrive|late|where is my/, "Delivery usually takes 30–45 minutes. Track your order live under Orders: it shows Order Received → In Kitchen → Sent to Delivery."],
+  [/pay|card|stripe|price|cost|cash/, "You pay securely by card at checkout. This site runs in test mode, so use card 4242 4242 4242 4242, any future date and any 3 digits. No real money is charged."],
+  [/vegan|vegetarian|veg\b|gluten|allerg/, "We have Vegan Cheese and a Gluten Free base. Use Build to pick them. For serious allergies please call " + SHOP.phone + "."],
+  [/custom|build|own|topping|base|sauce|cheese/, "Tap Build in the menu bar: choose a base, sauce, cheese, then any vegetables."],
+  [/order|status|track/, "Open Orders in the menu bar. It updates every few seconds as the kitchen works on your pizza."],
+  [/cancel|refund|wrong|problem|complain/, "Sorry about that! Please call " + SHOP.phone + " or email " + SHOP.email + " with your order time and we'll sort it out."],
+  [/password|login|log in|verify|account/, "Forgot your password? Tap Log in, then 'Forgot password?'. New accounts must verify their email before ordering."],
+  [/contact|phone|call|email|address|where/, "📞 " + SHOP.phone + "  ✉️ " + SHOP.email + "  📍 " + SHOP.address],
+  [/thank/, "You're welcome! Enjoy your pizza 🍕"],
+];
+function botReply(t) {
+  const s = t.toLowerCase();
+  for (const [re, ans] of RULES) if (re.test(s)) return ans;
+  return "I'm not sure about that. Try asking about hours, delivery, payment or your order, or open the Support page.";
+}
+
+function Chatbot() {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [msgs, setMsgs] = useState([{ from: "bot", text: "Hi! I'm Pizzabot 🍕 How can I help?" }]);
+  const end = useRef(null);
+  useEffect(() => { if (end.current) end.current.scrollIntoView({ behavior: "smooth" }); }, [msgs, open]);
+  const send = (q) => {
+    const t = (q || text).trim();
+    if (!t) return;
+    setMsgs((m) => [...m, { from: "me", text: t }, { from: "bot", text: botReply(t) }]);
+    setText("");
+  };
+  const chips = ["Opening hours", "Delivery time", "How to pay", "Vegan options", "Track my order"];
+  return (
+    <div>
+      {open && (
+        <div className="bot">
+          <div className="bot-head"><span>🍕 Pizzabot</span><button onClick={() => setOpen(false)}>✕</button></div>
+          <div className="bot-msgs">
+            {msgs.map((m, i) => <div key={i} className={"bubble " + m.from}>{m.text}</div>)}
+            <div ref={end} />
+          </div>
+          <div className="chips">{chips.map((c) => <button key={c} onClick={() => send(c)}>{c}</button>)}</div>
+          <form className="bot-in" onSubmit={(e) => { e.preventDefault(); send(); }}>
+            <input placeholder="Type your question..." value={text} onChange={(e) => setText(e.target.value)} />
+            <button>Send</button>
+          </form>
+        </div>
+      )}
+      <button className="bot-fab" onClick={() => setOpen(!open)} aria-label="Chat">{open ? "✕" : "💬"}</button>
+    </div>
+  );
+}
+
+/* ---------- Support ---------- */
+function Support() {
+  const [f, setF] = useState({ name: "", email: "", message: "" });
+  const [sent, setSent] = useState(false);
+  const submit = (e) => { e.preventDefault(); if (f.name && f.email && f.message) setSent(true); };
+  const faqs = [
+    ["How long does delivery take?", "Usually 30–45 minutes. Track it live under Orders."],
+    ["How do I pay?", "By card at checkout. This demo uses Stripe test mode: card 4242 4242 4242 4242."],
+    ["Can I make my own pizza?", "Yes! Tap Build and choose a base, sauce, cheese and vegetables."],
+    ["Do you have vegan or gluten-free options?", "Yes: Vegan Cheese and a Gluten Free base."],
+    ["I forgot my password.", "On the login page tap 'Forgot password?' and follow the link we send."],
+  ];
+  return (
+    <div className="wrap">
+      <h2>Customer service</h2>
+      <div className="support-box">
+        <div><b>📞</b>{SHOP.phone}</div>
+        <div><b>✉️</b>{SHOP.email}</div>
+        <div><b>🕗</b>{SHOP.hours}</div>
+      </div>
+      <h2>FAQ</h2>
+      {faqs.map(([q, a]) => <details key={q}><summary>{q}</summary><p>{a}</p></details>)}
+      <h2 style={{ marginTop: 20 }}>Send us a message</h2>
+      {sent ? <div className="msg ok">Thanks {f.name}! Our team will get back to you soon.</div> : (
+        <form onSubmit={submit}>
+          <input placeholder="Your name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <input type="email" placeholder="Your email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+          <textarea placeholder="How can we help?" value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} />
+          <button className="btn full">Send message</button>
+        </form>
+      )}
+      <p className="muted" style={{ marginTop: 12 }}>Or chat with Pizzabot using the 💬 button.</p>
+    </div>
+  );
+}
+
 /* ---------- Login / Register / Forgot ---------- */
 function AuthPage({ mode, onLogin }) {
   const [f, setF] = useState({ name: "", email: "", password: "" });
@@ -62,27 +218,53 @@ function AuthPage({ mode, onLogin }) {
         go("dashboard");
       } else {
         const d = await call("/api/auth/" + mode, "POST", f);
+        if (d.verifyToken) return go("inbox-verify/" + d.verifyToken);
+        if (d.resetToken) return go("inbox-reset/" + d.resetToken);
         setMsg({ ok: true, text: d.message });
       }
     });
   };
   return (
-    <div className="auth">
-      <h1>🍕 {titles[mode]}</h1>
-      <form onSubmit={submit}>
-        {mode === "register" && <input placeholder="Full name" value={f.name} onChange={set("name")} />}
-        <input type="email" placeholder="Email" value={f.email} onChange={set("email")} />
-        {mode !== "forgot" && <input type="password" placeholder="Password (8+ chars, 1 number)" value={f.password} onChange={set("password")} />}
-        <button className="btn full" disabled={busy}>
-          {busy ? "Please wait..." : mode === "login" ? "Log in" : mode === "register" ? "Sign up" : "Send reset link"}
-        </button>
-      </form>
-      <Msg m={msg} />
-      <div className="links">
-        {mode === "login" ? <a href="#register">Create account</a> : <a href="#login">Back to login</a>}
-        {mode === "login" && <a href="#forgot">Forgot password?</a>}
+    <div className="authbg" style={{ backgroundImage: "linear-gradient(rgba(20,8,5,.6),rgba(20,8,5,.75)), url(" + (window.AUTH_IMG || "") + ")" }}>
+      <div className="auth">
+        <h1>🍕 {titles[mode]}</h1>
+        <form onSubmit={submit}>
+          {mode === "register" && <input placeholder="Full name" value={f.name} onChange={set("name")} />}
+          <input type="email" placeholder="Email" value={f.email} onChange={set("email")} />
+          {mode !== "forgot" && <input type="password" placeholder="Password (8+ chars, 1 number)" value={f.password} onChange={set("password")} />}
+          <button className="btn full" disabled={busy}>
+            {busy ? "Please wait..." : mode === "login" ? "Log in" : mode === "register" ? "Sign up" : "Send reset link"}
+          </button>
+        </form>
+        <Msg m={msg} />
+        <div className="links">
+          {mode === "login" ? <a href="#register">Create account</a> : <a href="#login">Back to login</a>}
+          {mode === "login" && <a href="#forgot">Forgot password?</a>}
+        </div>
       </div>
-      <div className="links"><a href="#admin">Admin login</a></div>
+    </div>
+  );
+}
+
+/* ---------- Demo inbox (simulated email) ---------- */
+function DemoInbox({ kind, token }) {
+  const isVerify = kind === "verify";
+  const link = "#" + (isVerify ? "verify/" : "reset/") + token;
+  return (
+    <div className="authbg">
+      <div className="auth">
+        <h1>📬 Demo inbox</h1>
+        <p className="muted">This page stands in for the real email in demo mode.</p>
+        <div className="mail">
+          <div className="bar">From: Pizza Delivery<br />Subject: {isVerify ? "Verify your email" : "Reset your password"}</div>
+          <div className="body">
+            <p style={{ marginBottom: 14 }}>
+              {isVerify ? "Welcome to Pizza Delivery! Tap the button below to verify your email." : "Tap the button below to choose a new password. The link is valid for 1 hour."}
+            </p>
+            <a href={link}><button className="btn full">{isVerify ? "Verify my email" : "Reset password"}</button></a>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -92,7 +274,7 @@ function Verify({ token }) {
   useEffect(() => {
     call("/api/auth/verify/" + token).then((d) => setM({ ok: true, text: d.message })).catch((e) => setM({ ok: false, text: e.message }));
   }, [token]);
-  return <div className="auth"><h1>Email verification</h1><Msg m={m} /><div className="links"><a href="#login">Go to login</a></div></div>;
+  return <div className="authbg"><div className="auth"><h1>Email verification</h1><Msg m={m} /><div className="links"><a href="#login">Go to login</a></div></div></div>;
 }
 
 function Reset({ token }) {
@@ -106,37 +288,63 @@ function Reset({ token }) {
     });
   };
   return (
-    <div className="auth">
-      <h1>New password</h1>
-      <form onSubmit={submit}>
-        <input type="password" placeholder="New password (8+ chars, 1 number)" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button className="btn full" disabled={busy}>{busy ? "Please wait..." : "Change password"}</button>
-      </form>
-      <Msg m={msg} />
-      <div className="links"><a href="#login">Go to login</a></div>
+    <div className="authbg">
+      <div className="auth">
+        <h1>New password</h1>
+        <form onSubmit={submit}>
+          <input type="password" placeholder="New password (8+ chars, 1 number)" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button className="btn full" disabled={busy}>{busy ? "Please wait..." : "Change password"}</button>
+        </form>
+        <Msg m={msg} />
+        <div className="links"><a href="#login">Go to login</a></div>
+      </div>
     </div>
   );
 }
 
-/* ---------- Menu (pizza varieties) ---------- */
-function Menu({ opts, addToCart }) {
+/* ---------- Menu ---------- */
+function Menu({ opts, addToCart, name }) {
   return (
-    <div className="wrap">
-      <h2>Our pizzas</h2>
-      {opts.varieties.map((v) => (
-        <div className="card" key={v.name}>
-          <div className="row"><b>{v.name}</b><span className="price">{$(v.price)}</span></div>
-          <p className="muted">{v.desc}</p>
-          <p className="muted">{v.labels}</p>
-          <button className="btn full" style={{ marginTop: 10 }} onClick={() => addToCart(v)}>Add to cart</button>
+    <div>
+      <div className="hero" style={{ backgroundImage: "url(" + window.HERO_IMG + ")" }}>
+        <h1>Hot, fresh pizza<br />at <em>your door</em></h1>
+        <p>Welcome{name ? ", " + name : ""}! Pick a favourite or build your own.</p>
+        <div className="btns">
+          <a href="#menu-list"><button className="btn">Order now</button></a>
+          <button className="btn light" onClick={() => go("build")}>Build your own</button>
         </div>
-      ))}
-      <button className="btn alt full" onClick={() => go("build")}>🍕 Build your own pizza</button>
+        <div className="perks"><span>🚚 30–45 min delivery</span><span>🧀 Real mozzarella</span><span>🔥 Baked to order</span></div>
+      </div>
+      <div className="strip">
+        {(window.GALLERY || []).map((g, i) => <Photo key={i} src={g} alt="Pizza" />)}
+      </div>
+      <div className="wrap" id="menu-list">
+        <div className="how">
+          <div><b>🍕</b><strong>1. Choose</strong>Pick a favourite or build your own</div>
+          <div><b>💳</b><strong>2. Pay</strong>Secure card checkout</div>
+          <div><b>🛵</b><strong>3. Track</strong>Watch it go from kitchen to door</div>
+        </div>
+        <h2>Our pizzas</h2>
+        <div className="grid">
+          {opts.varieties.map((v) => (
+            <div className="pcard" key={v.name}>
+              <Photo src={imgFor(v.name)} alt={v.name} />
+              <div className="pbody">
+                <div className="row"><b>{v.name}</b><span className="price">{$(v.price)}</span></div>
+                <p className="muted">{v.desc}</p>
+                <p className="muted">{v.labels}</p>
+                <button className="btn full" style={{ marginTop: 8 }} onClick={() => addToCart(v)}>Add to cart</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button className="btn alt full" style={{ marginTop: 16 }} onClick={() => go("build")}>🍕 Build your own pizza</button>
+      </div>
     </div>
   );
 }
 
-/* ---------- Custom pizza builder ---------- */
+/* ---------- Builder ---------- */
 function Builder({ opts, addToCart }) {
   const keys = ["base", "sauce", "cheese", "veggie"];
   const titles = ["Choose your base", "Choose your sauce", "Choose your cheese", "Choose vegetables (optional)"];
@@ -179,7 +387,7 @@ function Builder({ opts, addToCart }) {
   );
 }
 
-/* ---------- Order summary + payment ---------- */
+/* ---------- Cart ---------- */
 function Cart({ cart, setCart }) {
   const { busy, msg, run } = useAsync();
   const total = cart.reduce((a, p) => a + p.price, 0);
@@ -194,9 +402,14 @@ function Cart({ cart, setCart }) {
       <h2>Order summary</h2>
       {cart.map((p, i) => (
         <div className="card" key={i}>
-          <div className="row"><b>{p.name}</b><span className="price">{$(p.price)}</span></div>
-          <p className="muted">{p.labels}</p>
-          <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setCart(cart.filter((_, x) => x !== i))}>Remove</button>
+          <div className="item">
+            <Photo src={imgFor(p.name)} alt={p.name} />
+            <div style={{ flex: 1 }}>
+              <div className="row"><b>{p.name}</b><span className="price">{$(p.price)}</span></div>
+              <p className="muted">{p.labels}</p>
+            </div>
+          </div>
+          <button className="btn ghost" style={{ marginTop: 10 }} onClick={() => setCart(cart.filter((_, x) => x !== i))}>Remove</button>
         </div>
       ))}
       <div className="card row"><b>Total</b><span className="price">{$(total)}</span></div>
@@ -207,7 +420,7 @@ function Cart({ cart, setCart }) {
   );
 }
 
-/* ---------- My orders with live status ---------- */
+/* ---------- My orders ---------- */
 function Orders() {
   const [orders, setOrders] = useState(null);
   const [err, setErr] = useState(null);
@@ -298,20 +511,22 @@ function Admin() {
   const out = () => { localStorage.removeItem("pizza_admin_token"); setAuthed(false); };
   if (!authed)
     return (
-      <div className="auth">
-        <h1>🔒 Admin login</h1>
-        <form onSubmit={login}>
-          <input type="email" placeholder="Admin email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
-          <input type="password" placeholder="Admin password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
-          <button className="btn full" disabled={busy}>{busy ? "Please wait..." : "Log in"}</button>
-        </form>
-        <Msg m={msg} />
-        <div className="links"><a href="#login">Back to customer site</a></div>
+      <div className="authbg">
+        <div className="auth">
+          <h1>🔒 Admin login</h1>
+          <form onSubmit={login}>
+            <input type="email" placeholder="Admin email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+            <input type="password" placeholder="Admin password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+            <button className="btn full" disabled={busy}>{busy ? "Please wait..." : "Log in"}</button>
+          </form>
+          <Msg m={msg} />
+          <div className="links"><a href="#login">Back to customer site</a></div>
+        </div>
       </div>
     );
   return (
     <div>
-      <div className="top"><b>🍕 Admin panel</b><nav><button onClick={out}>Log out</button></nav></div>
+      <div className="top"><b>🍕 Admin panel</b><nav><button className="pill" onClick={out}>Log out</button></nav></div>
       <div className="wrap">
         <div className="tabs">
           <button className={"btn" + (tab === "orders" ? "" : " ghost")} onClick={() => setTab("orders")}>Orders</button>
@@ -364,6 +579,9 @@ function App() {
   if (route === "admin") page = <Admin />;
   else if (route === "verify") page = <Verify token={arg} />;
   else if (route === "reset") page = <Reset token={arg} />;
+  else if (route === "inbox-verify") page = <DemoInbox kind="verify" token={arg} />;
+  else if (route === "inbox-reset") page = <DemoInbox kind="reset" token={arg} />;
+  else if (route === "support") page = <Support />;
   else if (!user) {
     const mode = route === "register" || route === "forgot" ? route : "login";
     page = <AuthPage key={mode} mode={mode} onLogin={setUser} />;
@@ -371,25 +589,16 @@ function App() {
   else if (route === "build") page = <Builder opts={opts} addToCart={addToCart} />;
   else if (route === "cart") page = <Cart cart={cart} setCart={setCart} />;
   else if (route === "orders") page = <Orders />;
-  else page = <Menu opts={opts} addToCart={addToCart} />;
+  else page = <Menu opts={opts} addToCart={addToCart} name={user} />;
 
-  const showNav = user && !["admin", "verify", "reset"].includes(route);
+  const isAdmin = route === "admin";
   return (
     <div>
-      {showNav && (
-        <div className="top">
-          <b>🍕 Pizza Delivery</b>
-          <nav>
-            <a href="#dashboard">Menu</a>
-            <a href="#build">Build</a>
-            <a href="#cart">Cart ({cart.length})</a>
-            <a href="#orders">Orders</a>
-            <button onClick={logout}>Log out</button>
-          </nav>
-        </div>
-      )}
+      {!isAdmin && <Header user={user} cartCount={cart.length} logout={logout} />}
       {banner && <div className="toast"><Msg m={banner} /></div>}
       {page}
+      {!isAdmin && <Footer />}
+      {!isAdmin && <Chatbot />}
     </div>
   );
 }
