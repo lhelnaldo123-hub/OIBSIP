@@ -2,6 +2,7 @@ const { useState, useEffect, useRef } = React;
 const API = window.API_URL.replace(/\/$/, "");
 const $ = (n) => "$" + Number(n).toFixed(2);
 const STATUSES = ["Order Received", "In Kitchen", "Sent to Delivery"];
+const LOW_LIMIT = 20;
 const go = (h) => { location.hash = h; };
 const imgFor = (name) => (window.PIZZA_IMG && window.PIZZA_IMG[name]) || window.DEFAULT_IMG;
 
@@ -451,14 +452,21 @@ function Orders() {
 }
 
 /* ---------- Admin ---------- */
-function StockRow({ item }) {
+function StockRow({ item, onSaved }) {
   const [v, setV] = useState(item.stock);
   const [m, setM] = useState("");
-  const save = () => A("/api/admin/inventory/" + item._id, "PUT", { stock: v }).then(() => setM("Saved ✓")).catch((e) => setM(e.message));
+  const low = item.stock < LOW_LIMIT;
+  const save = () =>
+    A("/api/admin/inventory/" + item._id, "PUT", { stock: v })
+      .then(() => { setM("Saved ✓"); onSaved(); })
+      .catch((e) => setM(e.message));
   return (
-    <div className="card">
+    <div className={"card" + (low ? " low" : "")}>
       <div className="row">
-        <div><b>{item.name}</b><div className="muted">{item.type}</div></div>
+        <div>
+          <b>{item.name}</b>{low && <span className="tag">LOW</span>}
+          <div className="muted">{item.stock} in stock</div>
+        </div>
         <div style={{ width: 110 }}><input type="number" min="0" value={v} onChange={(e) => setV(e.target.value)} style={{ marginBottom: 0 }} /></div>
       </div>
       <div className="row" style={{ marginTop: 8 }}><span className="muted">{m}</span><button className="btn" onClick={save}>Save</button></div>
@@ -466,40 +474,25 @@ function StockRow({ item }) {
   );
 }
 
-function AdminOrders() {
-  const [orders, setOrders] = useState([]);
-  const [err, setErr] = useState(null);
-  const load = () => A("/api/admin/orders").then((o) => { setOrders(o); setErr(null); }).catch((e) => setErr({ ok: false, text: e.message }));
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
-  const setStatus = (id, status) => A("/api/admin/orders/" + id, "PUT", { status }).then(load).catch((e) => setErr({ ok: false, text: e.message }));
-  return (
-    <div>
-      <Msg m={err} />
-      {orders.length === 0 && <p className="empty">No paid orders yet.</p>}
-      {orders.map((o) => (
-        <div className="card" key={o._id}>
-          <div className="row"><b>{o.user ? o.user.name : "Customer"}</b><span className="price">{$(o.total)}</span></div>
-          <p className="muted">{o.user && o.user.email} · {new Date(o.createdAt).toLocaleString()}</p>
-          {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
-          <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AdminStock() {
-  const [inv, setInv] = useState(null);
-  const [err, setErr] = useState(null);
-  useEffect(() => { A("/api/admin/inventory").then(setInv).catch((e) => setErr({ ok: false, text: e.message })); }, []);
-  return <div><Msg m={err} />{inv && inv.map((i) => <StockRow key={i._id} item={i} />)}</div>;
-}
-
 function Admin() {
   const [authed, setAuthed] = useState(!!localStorage.getItem("pizza_admin_token"));
   const [tab, setTab] = useState("orders");
   const [f, setF] = useState({ email: "", password: "" });
+  const [orders, setOrders] = useState([]);
+  const [inv, setInv] = useState([]);
+  const [err, setErr] = useState(null);
   const { busy, msg, run } = useAsync();
+
+  const loadOrders = () => A("/api/admin/orders").then((o) => { setOrders(o); setErr(null); }).catch((e) => setErr({ ok: false, text: e.message }));
+  const loadInv = () => A("/api/admin/inventory").then(setInv).catch((e) => setErr({ ok: false, text: e.message }));
+
+  useEffect(() => {
+    if (!authed) return;
+    loadOrders(); loadInv();
+    const t = setInterval(loadOrders, 5000);
+    return () => clearInterval(t);
+  }, [authed]);
+
   const login = (e) => {
     e.preventDefault();
     run(async () => {
@@ -509,6 +502,8 @@ function Admin() {
     });
   };
   const out = () => { localStorage.removeItem("pizza_admin_token"); setAuthed(false); };
+  const setStatus = (id, status) => A("/api/admin/orders/" + id, "PUT", { status }).then(loadOrders).catch((e) => setErr({ ok: false, text: e.message }));
+
   if (!authed)
     return (
       <div className="authbg">
@@ -524,15 +519,52 @@ function Admin() {
         </div>
       </div>
     );
+
+  const kitchen = orders.filter((o) => o.status === "In Kitchen").length;
+  const delivery = orders.filter((o) => o.status === "Sent to Delivery").length;
+  const lowCount = inv.filter((i) => i.stock < LOW_LIMIT).length;
+  const groups = [["base", "Pizza bases"], ["sauce", "Sauces"], ["cheese", "Cheeses"], ["veggie", "Vegetables"]];
+
   return (
-    <div>
+    <div className="admin">
       <div className="top"><b>🍕 Admin panel</b><nav><button className="pill" onClick={out}>Log out</button></nav></div>
       <div className="wrap">
+        <div className="stats">
+          <div className="stat"><b>{orders.length}</b><span>Paid orders</span></div>
+          <div className="stat"><b>{kitchen}</b><span>In kitchen</span></div>
+          <div className="stat"><b>{delivery}</b><span>Out for delivery</span></div>
+          <div className={"stat" + (lowCount ? " warn" : "")}><b>{lowCount}</b><span>Low stock</span></div>
+        </div>
+        <Msg m={err} />
         <div className="tabs">
           <button className={"btn" + (tab === "orders" ? "" : " ghost")} onClick={() => setTab("orders")}>Orders</button>
           <button className={"btn" + (tab === "stock" ? "" : " ghost")} onClick={() => setTab("stock")}>Inventory</button>
         </div>
-        {tab === "orders" ? <AdminOrders /> : <AdminStock />}
+
+        {tab === "orders" && (
+          <div>
+            {orders.length === 0 && <p className="empty">No paid orders yet.</p>}
+            {orders.map((o) => (
+              <div className="card" key={o._id}>
+                <div className="row"><b>{o.user ? o.user.name : "Customer"}</b><span className="price">{$(o.total)}</span></div>
+                <p className="muted">{o.user && o.user.email} · {new Date(o.createdAt).toLocaleString()}</p>
+                {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
+                <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "stock" && (
+          <div>
+            {groups.map(([type, title]) => (
+              <div key={type}>
+                <h3>{title}</h3>
+                {inv.filter((i) => i.type === type).map((i) => <StockRow key={i._id} item={i} onSaved={loadInv} />)}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
