@@ -68,12 +68,27 @@ async function priceOrder(pizzas) {
   return { lines, total: money(total), usage };
 }
 
+function cleanDelivery(d) {
+  d = d || {};
+  const country = String(d.country || "").trim().slice(0, 60);
+  const area = String(d.area || "").trim().slice(0, 80);
+  const address = String(d.address || "").trim().slice(0, 200);
+  const phone = String(d.phone || "").trim().slice(0, 25);
+  const note = String(d.note || "").trim().slice(0, 200);
+  if (!country) throw new Error("Please choose your country");
+  if (area.length < 2) throw new Error("Please enter your city or area");
+  if (address.length < 5) throw new Error("Please write your street address or landmark");
+  if (phone.replace(/\D/g, "").length < 7) throw new Error("Please enter a phone number we can call");
+  return { country, area, address, phone, note };
+}
+
 router.post("/", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user || !user.verified) return res.status(403).json({ error: "Verify your email first" });
+    const delivery = cleanDelivery((req.body || {}).delivery);
     const { lines, total, usage } = await priceOrder((req.body || {}).pizzas);
-    const order = await Order.create({ user: user._id, pizzas: lines, usage, total });
+    const order = await Order.create({ user: user._id, pizzas: lines, usage, delivery, total });
     const session = await getStripe().checkout.sessions.create({
       mode: "payment",
       line_items: [{
