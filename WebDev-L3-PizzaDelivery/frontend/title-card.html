@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo Title Card</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: Poppins, sans-serif; color: #fff; background: radial-gradient(circle at 30% 20%, #d62828 0%, #7a1010 45%, #1c1210 100%); display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+    .card { width: 100%; max-width: 560px; }
+    .logo { font-size: 4rem; }
+    .tag { display: inline-block; margin-top: 10px; padding: 6px 16px; border: 1px solid rgba(255,255,255,.4); border-radius: 30px; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { font-family: "Playfair Display", serif; font-size: 2.8rem; line-height: 1.15; margin: 8px 0; color: #ffb703; }
+    .label { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase; opacity: .7; margin-top: 22px; }
+    .value { font-size: 1.25rem; font-weight: 600; margin-top: 4px; }
+    .line { width: 70px; height: 3px; background: #ffb703; margin: 22px auto 0; border-radius: 3px; }
+    .foot { margin-top: 28px; font-size: .8rem; opacity: .75; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🍕</div>
+    <div class="tag">Oasis Infobyte · SIP</div>
+
+    <div class="label" style="margin-top:26px">Full Name</div>
+    <h1>Aaron Addo</h1>
+
+    <div class="line"></div>
+
+    <div class="label">Assigned Track</div>
+    <div class="value">Web Development &amp; Designing (Level 3)</div>
+
+    <div class="label">Task Title</div>
+    <div class="value">Pizza Delivery Full-Stack Application</div>
+
+    <div class="foot">React.js · Node.js · MongoDB · Stripe (test mode)</div>
+  </div>
+</body>
+</html>
