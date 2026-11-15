@@ -7,6 +7,7 @@ const { sendMail } = require("../mailer");
 
 const front = () => (process.env.FRONTEND_URL || "").replace(/\/$/, "");
 const token = () => crypto.randomBytes(24).toString("hex");
+const demo = () => process.env.DEMO_VERIFY === "true";
 
 router.post("/register", async (req, res) => {
   try {
@@ -26,7 +27,9 @@ router.post("/register", async (req, res) => {
     });
     const link = `${front()}/#verify/${verifyToken}`;
     sendMail(email, "Verify your email", `<p>Welcome to Pizza Delivery!</p><p><a href="${link}">Verify my email</a></p>`, link);
-    res.status(201).json({ message: "Account created. Check your email to verify it." });
+    const out = { message: "Account created. Check your email to verify it." };
+    if (demo()) out.verifyToken = verifyToken;
+    res.status(201).json(out);
   } catch (e) {
     res.status(500).json({ error: "Server error" });
   }
@@ -61,14 +64,16 @@ router.post("/login", async (req, res) => {
 router.post("/forgot", async (req, res) => {
   try {
     const u = await User.findOne({ email: String((req.body || {}).email || "").toLowerCase(), role: "user" });
+    const out = { message: "If that email exists, a reset link has been sent." };
     if (u) {
       u.resetToken = token();
       u.resetExpires = new Date(Date.now() + 3600000);
       await u.save();
       const link = `${front()}/#reset/${u.resetToken}`;
       sendMail(u.email, "Reset your password", `<p>Reset your password (valid 1 hour):</p><p><a href="${link}">Reset password</a></p>`, link);
+      if (demo()) out.resetToken = u.resetToken;
     }
-    res.json({ message: "If that email exists, a reset link has been sent." });
+    res.json(out);
   } catch (e) {
     res.status(500).json({ error: "Server error" });
   }
