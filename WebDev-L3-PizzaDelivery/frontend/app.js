@@ -73,9 +73,25 @@ function IngImg({ item, cls }) {
 
 /* ---------- Header / Footer ---------- */
 function Header({ user, cartCount, logout }) {
+  const [menu, setMenu] = useState(false);
+  const cur = useHash().split("/")[0];
+  const links = user
+    ? [["dashboard", "🍕", "Menu"], ["build", "🛠️", "Build your pizza"], ["orders", "📦", "Orders"], ["support", "💬", "Support"], ["cart", "🛒", "Cart"]]
+    : [["support", "💬", "Support"], ["login", "🔑", "Log in"], ["register", "✨", "Sign up"]];
+
+  useEffect(() => {
+    if (!menu) return;
+    const f = (e) => { if (e.key === "Escape") setMenu(false); };
+    window.addEventListener("keydown", f);
+    return () => window.removeEventListener("keydown", f);
+  }, [menu]);
+
   return (
     <header className="top">
-      <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
+      <div className="top-left">
+        <button className="burger" onClick={() => setMenu(true)} aria-label="Open menu">☰</button>
+        <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
+      </div>
       <nav>
         {user ? (
           <>
@@ -94,6 +110,24 @@ function Header({ user, cartCount, logout }) {
           </>
         )}
       </nav>
+
+      {menu && <div className="side-overlay" onClick={() => setMenu(false)} />}
+      <aside className={"sidebar" + (menu ? " open" : "")} aria-hidden={!menu}>
+        <div className="side-head">
+          <span className="logo">🍕 Slice <span>&amp; Co.</span></span>
+          <button onClick={() => setMenu(false)} aria-label="Close menu">✕</button>
+        </div>
+        {user && <p className="side-user">Hi, {user} 👋</p>}
+        <nav className="side-nav">
+          {links.map(([r, icon, label]) => (
+            <a key={r} href={"#" + r} className={cur === r ? "on" : ""} onClick={() => setMenu(false)}>
+              <span>{icon}</span> {label}
+              {r === "cart" && <span className="badge">{cartCount}</span>}
+            </a>
+          ))}
+        </nav>
+        {user && <button className="btn full side-out" onClick={() => { setMenu(false); logout(); }}>Log out</button>}
+      </aside>
     </header>
   );
 }
@@ -654,6 +688,106 @@ function Admin() {
   );
 }
 
+/* ---------- Floating cart (drag it left / right / anywhere) ---------- */
+function FloatingCart({ cart, setCart }) {
+  const SIZE = 58, GAP = 12;
+  const [open, setOpen] = useState(false);
+  const [pop, setPop] = useState(false);
+  const [drag, setDrag] = useState(null);
+  const [pos, setPos] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem("pizza_cart_pos"));
+      if (s && (s.side === "left" || s.side === "right") && typeof s.y === "number") return s;
+    } catch (e) {}
+    return { side: "left", y: Math.max(120, window.innerHeight - 170) };
+  });
+  const start = useRef(null);
+  const total = cart.reduce((a, p) => a + p.price, 0);
+  const clampY = (y) => Math.min(Math.max(y, 70), window.innerHeight - SIZE - GAP);
+  const clampX = (x) => Math.min(Math.max(x, 0), window.innerWidth - SIZE);
+
+  // small bounce whenever something is added
+  useEffect(() => {
+    if (!cart.length) return;
+    setPop(true);
+    const t = setTimeout(() => setPop(false), 400);
+    return () => clearTimeout(t);
+  }, [cart.length]);
+
+  const down = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    start.current = { px: e.clientX, py: e.clientY, x: r.left, y: r.top, moved: false, cur: null };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    const s = start.current;
+    if (!s) return;
+    const dx = e.clientX - s.px, dy = e.clientY - s.py;
+    if (!s.moved && Math.hypot(dx, dy) < 6) return;
+    s.moved = true;
+    s.cur = { x: clampX(s.x + dx), y: clampY(s.y + dy) };
+    setOpen(false);
+    setDrag(s.cur);
+  };
+  const up = () => {
+    const s = start.current;
+    start.current = null;
+    if (!s) return;
+    if (!s.moved) { setOpen((o) => !o); return; }
+    // snap to the nearest side
+    const side = s.cur.x + SIZE / 2 < window.innerWidth / 2 ? "left" : "right";
+    const p = { side, y: s.cur.y };
+    setPos(p);
+    setDrag(null);
+    try { localStorage.setItem("pizza_cart_pos", JSON.stringify(p)); } catch (e) {}
+  };
+
+  const y = clampY(pos.y);
+  const fabStyle = drag ? { left: drag.x, top: drag.y, right: "auto" } : { top: y };
+  const panelStyle = y > window.innerHeight / 2 ? { bottom: window.innerHeight - y + 8 } : { top: y + SIZE + 8 };
+
+  return (
+    <>
+      {open && (
+        <div className={"cart-panel " + pos.side} style={panelStyle}>
+          <div className="cart-panel-head">
+            <b>Your cart ({cart.length})</b>
+            <button onClick={() => setOpen(false)} aria-label="Close">✕</button>
+          </div>
+          <div className="cart-panel-list">
+            {!cart.length && <p className="muted" style={{ padding: "8px 0" }}>Your cart is empty.</p>}
+            {cart.map((p, i) => (
+              <div className="cart-panel-row" key={i}>
+                <div>
+                  <div className="cart-panel-name">{p.name}</div>
+                  <span className="price">{$(p.price)}</span>
+                </div>
+                <button onClick={() => setCart(cart.filter((_, x) => x !== i))} aria-label="Remove">🗑</button>
+              </div>
+            ))}
+          </div>
+          {cart.length > 0 && <div className="cart-panel-total"><span>Total</span><b>{$(total)}</b></div>}
+          {cart.length > 0
+            ? <button className="btn full" onClick={() => { setOpen(false); go("cart"); }}>Checkout</button>
+            : <button className="btn full" onClick={() => { setOpen(false); go("dashboard"); }}>Browse pizzas</button>}
+        </div>
+      )}
+      <button
+        className={"cart-fab " + pos.side + (pop ? " pop" : "")}
+        style={fabStyle}
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+        aria-label="Cart (drag to move)"
+      >
+        🛒
+        {cart.length > 0 && <span className="cart-count">{cart.length}</span>}
+      </button>
+    </>
+  );
+}
+
 /* ---------- App ---------- */
 function App() {
   const hash = useHash();
@@ -715,6 +849,7 @@ function App() {
       {page}
       {!isAdmin && <Footer />}
       {!isAdmin && <Chatbot />}
+      {!isAdmin && user && opts && route !== "cart" && <FloatingCart cart={cart} setCart={setCart} />}
     </div>
   );
 }
