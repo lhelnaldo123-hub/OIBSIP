@@ -126,10 +126,13 @@ async function finalizePaid(orderId) {
  * If restock is true the ingredients and packaging it used go back into stock.
  * Returns the cancelled order, or null if it was not paid or was already cancelled.
  */
-async function cancelPaidOrder(orderId, { restock, note, by }) {
+async function cancelPaidOrder(orderId, { restock, note, by, cancelledBy = "admin", reason = "", onlyStatus }) {
+  const filter = { _id: orderId, paid: true, status: { $ne: "Cancelled" } };
+  if (onlyStatus) filter.status = onlyStatus;          // customers can only cancel while the order is still "Order Received"
+  else filter.status = { $nin: ["Cancelled", "Delivered"] };
   const order = await Order.findOneAndUpdate(
-    { _id: orderId, paid: true, status: { $ne: "Cancelled" } },
-    { status: "Cancelled", cancelledAt: new Date(), cancelNote: String(note || "").slice(0, 200) },
+    filter,
+    { status: "Cancelled", cancelledAt: new Date(), cancelledBy, cancelReason: String(reason || "").slice(0, 80), cancelNote: String(note || "").slice(0, 200) },
     { new: true }
   );
   if (!order) return null;
