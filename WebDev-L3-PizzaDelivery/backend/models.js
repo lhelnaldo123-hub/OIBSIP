@@ -26,14 +26,18 @@ const Inventory = mongoose.model("Inventory", new Schema({
   reorderLevel: Number,                           // empty = use LOW_STOCK_THRESHOLD (default 20)
   supplier: { type: String, default: "" },
   expiry: Date,                                   // optional best-before date
+  // Automatic use for stock-only items (packaging etc.), taken from stock whenever an order is placed:
+  usePerPizza: { type: Number, default: 0 },      // e.g. 1 pizza box per pizza
+  forSize: { type: String, default: "" },         // "" = every size, or a size key from sizes.js (R, L, F)
+  usePerOrder: { type: Number, default: 0 },      // e.g. 1 carry bag per order
   active: { type: Boolean, default: true },       // false = hidden from customers, kept for history
   alerted: { type: Boolean, default: false },
 }));
 
 const Order = mongoose.model("Order", new Schema({
   user: { type: Schema.Types.ObjectId, ref: "User" },
-  pizzas: [{ name: String, base: String, sauce: String, cheese: String, veggies: [String], price: Number }],
-  usage: [{ item: Schema.Types.ObjectId, qty: Number }],
+  pizzas: [{ name: String, size: String, sizeLabel: String, base: String, sauce: String, cheese: String, veggies: [String], price: Number }],
+  usage: [{ item: Schema.Types.ObjectId, qty: Number, soft: Boolean }],
   delivery: { country: String, area: String, address: String, phone: String, note: String },
   total: Number,
   status: { type: String, default: "Pending Payment" },
@@ -41,6 +45,10 @@ const Order = mongoose.model("Order", new Schema({
   held: { type: Boolean, default: false },        // true while the order's stock is reserved but unpaid
   reservedUntil: Date,                            // when an unpaid reservation is released
   stripeSession: String,
+  cancelledAt: Date,
+  cancelNote: String,
+  refundId: String,
+  refundedAt: Date,
 }, { timestamps: true }));
 
 // One row per stock movement: who, when, how much, before/after and why.
@@ -53,7 +61,7 @@ const StockLog = mongoose.model("StockLog", new Schema({
   after: Number,
   reason: {
     type: String,
-    enum: ["delivery", "wastage", "correction", "other", "order", "order-released", "new-item"],
+    enum: ["delivery", "wastage", "correction", "other", "order", "order-released", "order-cancelled", "new-item"],
   },
   note: { type: String, default: "" },
   by: String,
