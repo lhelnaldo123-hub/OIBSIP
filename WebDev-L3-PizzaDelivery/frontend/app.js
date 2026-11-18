@@ -2,7 +2,8 @@ const { useState, useEffect, useRef } = React;
 const API = window.API_URL.replace(/\/$/, "");
 const $ = (n) => "$" + Number(n).toFixed(2);
 const STATUSES = ["Order Received", "In Kitchen", "Sent to Delivery"];
-const LOW_LIMIT = 20;
+const LOW_FALLBACK = 20; // only used if the server sends no reorder level
+const isLow = (i) => i.stock < (i.reorderLevel !== undefined && i.reorderLevel !== null ? i.reorderLevel : LOW_FALLBACK);
 const go = (h) => { location.hash = h; };
 const imgFor = (name) => (window.PIZZA_IMG && window.PIZZA_IMG[name]) || window.DEFAULT_IMG;
 
@@ -11,7 +12,7 @@ const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Antigua
 /* ---- Change these to your real details ---- */
 const SHOP = { name: "Slice & Co.", phone: "+233 20 000 0000", email: "help@sliceandco.com", address: "12 Market Street, Accra", hours: "Open daily 10am – 11pm" };
 
-const TYPE_ICON = { base: "🍞", sauce: "🥫", cheese: "🧀", veggie: "🥬" };
+const TYPE_ICON = { base: "🍞", sauce: "🥫", cheese: "🧀", veggie: "🥬", packaging: "📦", drink: "🥤", side: "🍟", supply: "🧴", other: "📝" };
 const NAME_ICON = { Mushroom: "🍄", Onion: "🧅", "Bell Pepper": "🫑", Olives: "🫒", Sweetcorn: "🌽", Tomato: "🍅", "Tomato Basil": "🍅", BBQ: "🍖", Pesto: "🌿", "White Garlic": "🧄", "Spicy Arrabbiata": "🌶️", "Cheese Burst": "🧀", "Gluten Free": "🌾", "Whole Wheat": "🌾" };
 const iconFor = (i) => NAME_ICON[i.name] || TYPE_ICON[i.type] || "🍕";
 
@@ -32,6 +33,41 @@ async function call(path, method = "GET", body, key = "pizza_token") {
   return data;
 }
 const A = (p, m, b) => call(p, m, b, "pizza_admin_token");
+
+// Download a CSV file from the admin API (needs the admin login, so a plain link will not work).
+async function downloadCsv(path, filename) {
+  const res = await fetch(API + path, { headers: { Authorization: "Bearer " + (localStorage.getItem("pizza_admin_token") || "") } });
+  if (!res.ok) throw new Error("Could not download the file");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/* ---- pizza sizes (the server sends the list; Regular is the fallback) ---- */
+const DEFAULT_SIZES = [{ key: "R", label: "Regular", mult: 1, portions: 1 }];
+const sizeList = (opts) => (opts && opts.sizes && opts.sizes.length ? opts.sizes : DEFAULT_SIZES);
+const sizeOf = (opts, key) => sizeList(opts).find((s) => s.key === key) || sizeList(opts)[0];
+// p.price is the Regular price; the size multiplies it (the server does the same sum).
+const priceFor = (opts, p, key) => Math.round(p.price * sizeOf(opts, key || p.size || "R").mult * 100) / 100;
+
+function SizePicker({ opts, value, onChange, base, minStock }) {
+  const list = sizeList(opts);
+  if (list.length < 2) return null;
+  return (
+    <div className="sizes" role="group" aria-label="Pizza size">
+      {list.map((s) => {
+        const short = minStock !== undefined && minStock < s.portions;
+        return (
+          <button type="button" key={s.key} className={"szb" + (value === s.key ? " on" : "")} disabled={short} onClick={() => onChange(s.key)}>
+            <b>{s.label}</b><span>{short ? "not enough" : $(Math.round(base * s.mult * 100) / 100)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function useHash() {
   const [h, setH] = useState(location.hash.slice(1));
@@ -73,25 +109,9 @@ function IngImg({ item, cls }) {
 
 /* ---------- Header / Footer ---------- */
 function Header({ user, cartCount, logout }) {
-  const [menu, setMenu] = useState(false);
-  const cur = useHash().split("/")[0];
-  const links = user
-    ? [["dashboard", "🍕", "Menu"], ["build", "🛠️", "Build your pizza"], ["orders", "📦", "Orders"], ["support", "💬", "Support"], ["cart", "🛒", "Cart"]]
-    : [["support", "💬", "Support"], ["login", "🔑", "Log in"], ["register", "✨", "Sign up"]];
-
-  useEffect(() => {
-    if (!menu) return;
-    const f = (e) => { if (e.key === "Escape") setMenu(false); };
-    window.addEventListener("keydown", f);
-    return () => window.removeEventListener("keydown", f);
-  }, [menu]);
-
   return (
     <header className="top">
-      <div className="top-left">
-        <button className="burger" onClick={() => setMenu(true)} aria-label="Open menu">☰</button>
-        <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
-      </div>
+      <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
       <nav>
         {user ? (
           <>
@@ -110,24 +130,6 @@ function Header({ user, cartCount, logout }) {
           </>
         )}
       </nav>
-
-      {menu && <div className="side-overlay" onClick={() => setMenu(false)} />}
-      <aside className={"sidebar" + (menu ? " open" : "")} aria-hidden={!menu}>
-        <div className="side-head">
-          <span className="logo">🍕 Slice <span>&amp; Co.</span></span>
-          <button onClick={() => setMenu(false)} aria-label="Close menu">✕</button>
-        </div>
-        {user && <p className="side-user">Hi, {user} 👋</p>}
-        <nav className="side-nav">
-          {links.map(([r, icon, label]) => (
-            <a key={r} href={"#" + r} className={cur === r ? "on" : ""} onClick={() => setMenu(false)}>
-              <span>{icon}</span> {label}
-              {r === "cart" && <span className="badge">{cartCount}</span>}
-            </a>
-          ))}
-        </nav>
-        {user && <button className="btn full side-out" onClick={() => { setMenu(false); logout(); }}>Log out</button>}
-      </aside>
     </header>
   );
 }
@@ -354,6 +356,22 @@ function Reset({ token }) {
 }
 
 /* ---------- Menu ---------- */
+function PizzaCard({ v, opts, addToCart }) {
+  const [size, setSize] = useState("R");
+  return (
+    <div className="pcard">
+      <Photo src={imgFor(v.name)} alt={v.name} />
+      <div className="pbody">
+        <div className="row"><b>{v.name}</b><span className="price">{$(priceFor(opts, v, size))}</span></div>
+        <p className="muted">{v.desc}</p>
+        <p className="muted">{v.labels}</p>
+        <SizePicker opts={opts} value={size} onChange={setSize} base={v.price} minStock={v.minStock} />
+        <button className="btn full" style={{ marginTop: 8 }} disabled={v.soldOut} onClick={() => addToCart({ ...v, size })}>{v.soldOut ? "Sold out" : "Add to cart"}</button>
+      </div>
+    </div>
+  );
+}
+
 function Menu({ opts, addToCart, name }) {
   return (
     <div>
@@ -377,17 +395,7 @@ function Menu({ opts, addToCart, name }) {
         </div>
         <h2>Our pizzas</h2>
         <div className="grid">
-          {opts.varieties.map((v) => (
-            <div className="pcard" key={v.name}>
-              <Photo src={imgFor(v.name)} alt={v.name} />
-              <div className="pbody">
-                <div className="row"><b>{v.name}</b><span className="price">{$(v.price)}</span></div>
-                <p className="muted">{v.desc}</p>
-                <p className="muted">{v.labels}</p>
-                <button className="btn full" style={{ marginTop: 8 }} onClick={() => addToCart(v)}>Add to cart</button>
-              </div>
-            </div>
-          ))}
+          {opts.varieties.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} />)}
         </div>
         <button className="btn alt full" style={{ marginTop: 20 }} onClick={() => go("build")}>🍕 Build your own pizza</button>
       </div>
@@ -401,6 +409,7 @@ function Builder({ opts, addToCart }) {
   const titles = ["Choose your base", "Choose your sauce", "Choose your cheese", "Choose vegetables (optional)"];
   const [step, setStep] = useState(0);
   const [sel, setSel] = useState({ base: null, sauce: null, cheese: null, veggies: [] });
+  const [size, setSize] = useState("R");
   const list = opts[keys[step]];
   const chosen = (id) => (step < 3 ? sel[keys[step]] === id : sel.veggies.includes(id));
   const pick = (id) => {
@@ -413,7 +422,7 @@ function Builder({ opts, addToCart }) {
     const b = find("base", sel.base), s = find("sauce", sel.sauce), c = find("cheese", sel.cheese);
     const vs = sel.veggies.map((id) => find("veggie", id));
     addToCart({
-      name: "Custom Pizza", base: sel.base, sauce: sel.sauce, cheese: sel.cheese, veggies: sel.veggies,
+      name: "Custom Pizza", size, base: sel.base, sauce: sel.sauce, cheese: sel.cheese, veggies: sel.veggies,
       labels: [b.name, s.name, c.name, ...vs.map((v) => v.name)].join(", "),
       price: +(4 + b.price + s.price + c.price + vs.reduce((a, v) => a + v.price, 0)).toFixed(2),
     });
@@ -429,6 +438,16 @@ function Builder({ opts, addToCart }) {
           <span className="price">{$(i.price)}</span>
         </button>
       ))}
+      {step === 3 && (() => {
+        const all = [find("base", sel.base), find("sauce", sel.sauce), find("cheese", sel.cheese), ...sel.veggies.map((id) => find("veggie", id))].filter(Boolean);
+        const regular = 4 + all.reduce((a, i) => a + i.price, 0);
+        return (
+          <div style={{ marginTop: 12 }}>
+            <h3>Choose your size</h3>
+            <SizePicker opts={opts} value={size} onChange={setSize} base={regular} minStock={Math.min(...all.map((i) => i.stock))} />
+          </div>
+        );
+      })()}
       <div className="row" style={{ marginTop: 14 }}>
         <button className="btn ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>
         {step < 3
@@ -440,7 +459,7 @@ function Builder({ opts, addToCart }) {
 }
 
 /* ---------- Cart + delivery location (worldwide) ---------- */
-function Cart({ cart, setCart }) {
+function Cart({ cart, setCart, opts }) {
   const { busy, msg, setMsg, run } = useAsync();
   const blank = { country: "", area: "", address: "", phone: "", note: "" };
   const [d, setD] = useState(() => {
@@ -448,7 +467,7 @@ function Cart({ cart, setCart }) {
     catch (e) { return blank; }
   });
   const setField = (k) => (e) => setD({ ...d, [k]: e.target.value });
-  const total = cart.reduce((a, p) => a + p.price, 0);
+  const total = cart.reduce((a, p) => a + priceFor(opts, p), 0);
 
   const pay = () => {
     if (!d.country) return setMsg({ ok: false, text: "Please choose your country." });
@@ -457,7 +476,7 @@ function Cart({ cart, setCart }) {
     if (d.phone.replace(/\D/g, "").length < 7) return setMsg({ ok: false, text: "Please enter a phone number we can call (include the country code)." });
     run(async () => {
       localStorage.setItem("pizza_delivery", JSON.stringify(d));
-      const pizzas = cart.map(({ name, base, sauce, cheese, veggies }) => ({ name, base, sauce, cheese, veggies }));
+      const pizzas = cart.map(({ name, size, base, sauce, cheese, veggies }) => ({ name, size: size || "R", base, sauce, cheese, veggies }));
       const r = await call("/api/orders", "POST", { pizzas, delivery: d });
       window.location.href = r.url;
     });
@@ -472,10 +491,11 @@ function Cart({ cart, setCart }) {
           <div className="item">
             <Photo src={imgFor(p.name)} alt={p.name} />
             <div style={{ flex: 1 }}>
-              <div className="row"><b>{p.name}</b><span className="price">{$(p.price)}</span></div>
+              <div className="row"><b>{p.name}</b><span className="price">{$(priceFor(opts, p))}</span></div>
               <p className="muted">{p.labels}</p>
             </div>
           </div>
+          <SizePicker opts={opts} value={p.size || "R"} base={p.price} onChange={(k) => setCart(cart.map((x, n) => (n === i ? { ...x, size: k } : x)))} />
           <button className="btn ghost" style={{ marginTop: 10 }} onClick={() => setCart(cart.filter((_, x) => x !== i))}>Remove</button>
         </div>
       ))}
@@ -526,9 +546,11 @@ function Orders() {
         return (
           <div className="card" key={o._id}>
             <div className="row"><b>{new Date(o.createdAt).toLocaleString()}</b><span className="price">{$(o.total)}</span></div>
-            {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
+            {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}{p.sizeLabel && p.sizeLabel !== "Regular" ? " (" + p.sizeLabel + ")" : ""}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
             {o.delivery && o.delivery.address && <p className="muted" style={{ marginTop: 6 }}>📍 {place(o.delivery)}</p>}
-            <div className="track">{STATUSES.map((s, i) => <span key={s} className={i <= idx ? "on" : ""}>{s}</span>)}</div>
+            {o.status === "Cancelled"
+              ? <p className="cancelled">❌ This order was cancelled{o.refundedAt ? ". Your payment has been refunded; your bank may take a few days to show it." : ". If you were charged, please contact us."}</p>
+              : <div className="track">{STATUSES.map((s, i) => <span key={s} className={i <= idx ? "on" : ""}>{s}</span>)}</div>}
           </div>
         );
       })}
@@ -537,30 +559,277 @@ function Orders() {
 }
 
 /* ---------- Admin ---------- */
+const GROUPS = [
+  ["base", "🍞 Pizza bases"], ["sauce", "🥫 Sauces"], ["cheese", "🧀 Cheeses"], ["veggie", "🥬 Vegetables & toppings"],
+  ["packaging", "📦 Packaging"], ["drink", "🥤 Drinks"], ["side", "🍟 Sides"], ["supply", "🧴 Supplies"], ["other", "📝 Other"],
+];
+const SELLS = ["base", "sauce", "cheese", "veggie"]; // types that appear in the customer's pizza builder
+const REASONS = [["delivery", "Delivery received"], ["wastage", "Wastage / spoiled"], ["correction", "Stock count correction"], ["other", "Other"]];
+const REASON_LABEL = { delivery: "Delivery", wastage: "Wastage", correction: "Correction", other: "Other", order: "Customer order", "order-released": "Order released", "order-cancelled": "Order cancelled", "new-item": "New item" };
+const SIZE_CHOICES = [["", "Every size"], ["R", "Regular"], ["L", "Large"], ["F", "Family"]]; // keep in step with backend/sizes.js
+const daysLeft = (d) => (d ? Math.ceil((new Date(d).getTime() - Date.now()) / 86400000) : null);
+const dateValue = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+
 function StockRow({ item, onSaved }) {
-  const [v, setV] = useState(item.stock);
-  const [m, setM] = useState("");
-  const low = item.stock < LOW_LIMIT;
-  const pct = Math.max(2, Math.min(100, item.stock));
-  const save = () =>
-    A("/api/admin/inventory/" + item._id, "PUT", { stock: v })
-      .then(() => { setM("Saved ✓"); onSaved(); })
-      .catch((e) => setM(e.message));
+  const [delta, setDelta] = useState("");
+  const [reason, setReason] = useState("delivery");
+  const [note, setNote] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
+  const [m, setM] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const low = isLow(item);
+  const hidden = item.active === false;
+  const left = daysLeft(item.expiry);
+  const pct = Math.max(2, Math.min(100, Math.round((item.stock / (Math.max(1, item.reorderLevel) * 3)) * 100)));
+
+  const typeDelta = (v) => {
+    setDelta(v);
+    const n = parseInt(v, 10);
+    if (n < 0 && reason === "delivery") setReason("wastage");
+    if (n > 0 && reason === "wastage") setReason("delivery");
+  };
+  const apply = () => {
+    const n = parseInt(delta, 10);
+    if (isNaN(n) || n === 0) return setM({ ok: false, text: "Enter a number such as 10 or -3" });
+    setBusy(true);
+    A("/api/admin/inventory/" + item._id + "/adjust", "POST", { change: n, reason, note })
+      .then(() => { setDelta(""); setNote(""); setM({ ok: true, text: "Saved ✓" }); onSaved(); })
+      .catch((e) => setM({ ok: false, text: e.message }))
+      .finally(() => setBusy(false));
+  };
+
+  const openEdit = () => {
+    setForm({
+      name: item.name, price: item.price, unit: item.unit || "pcs",
+      reorderLevel: item.reorderCustom ? item.reorderLevel : "",
+      supplier: item.supplier || "", expiry: dateValue(item.expiry), active: !hidden,
+      usePerPizza: item.usePerPizza || 0, forSize: item.forSize || "", usePerOrder: item.usePerOrder || 0,
+    });
+    setEditing(true);
+    setM(null);
+  };
+  const saveEdit = () => {
+    setBusy(true);
+    A("/api/admin/inventory/" + item._id, "PATCH", form)
+      .then(() => { setEditing(false); setM({ ok: true, text: "Details saved ✓" }); onSaved(); })
+      .catch((e) => setM({ ok: false, text: e.message }))
+      .finally(() => setBusy(false));
+  };
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
   return (
-    <div className={"icard" + (low ? " low" : "")}>
+    <div className={"icard" + (low && !hidden ? " low" : "") + (hidden ? " off" : "")}>
       <div className="ihead">
         <IngImg item={item} cls="ico" />
         <div className="info">
-          <b>{item.name}</b>{low && <span className="tag">LOW</span>}
-          <div className="muted">{item.stock} in stock</div>
+          <b>{item.name}</b>
+          {low && !hidden && <span className="tag">LOW</span>}
+          {hidden && <span className="tag grey">HIDDEN</span>}
+          {left !== null && left <= 7 && <span className={"tag " + (left < 0 ? "" : "amber")}>{left < 0 ? "EXPIRED" : "EXPIRES IN " + left + "d"}</span>}
+          <div className="muted"><b className="big">{item.stock}</b> {item.unit || "pcs"} · reorder at {item.reorderLevel}</div>
+          {item.supplier && <div className="muted">Supplier: {item.supplier}</div>}
+          {(item.usePerPizza > 0 || item.usePerOrder > 0) && (
+            <div className="muted">Auto-used: {item.usePerPizza > 0 ? item.usePerPizza + " per " + ((SIZE_CHOICES.find((s) => s[0] === (item.forSize || "")) || [0, "every"])[1]).toLowerCase() + " pizza" : ""}{item.usePerPizza > 0 && item.usePerOrder > 0 ? " + " : ""}{item.usePerOrder > 0 ? item.usePerOrder + " per order" : ""}</div>
+          )}
         </div>
       </div>
       <div className="sbar"><i style={{ width: pct + "%" }}></i></div>
-      <div className="iedit">
-        <input type="number" min="0" value={v} onChange={(e) => setV(e.target.value)} />
-        <button className="btn" onClick={save}>Save</button>
+      <div className="adj">
+        <input type="number" step="1" placeholder="+10 or -3" value={delta} onChange={(e) => typeDelta(e.target.value)} aria-label={"Change in " + item.name} />
+        <select value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Reason">
+          {REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
       </div>
-      {m && <p className="muted" style={{ marginTop: 6 }}>{m}</p>}
+      <input type="text" placeholder="Note (optional)" maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note" />
+      <div className="iactions">
+        <button className="btn" disabled={busy} onClick={apply}>Update stock</button>
+        <button className="btn ghost" onClick={editing ? () => setEditing(false) : openEdit}>{editing ? "Close" : "Edit"}</button>
+      </div>
+      <Msg m={m} />
+      {editing && (
+        <div className="eform">
+          <div className="fgrid">
+            <label>Name<input value={form.name} onChange={set("name")} /></label>
+            {SELLS.includes(item.type) && <label>Customer price<input type="number" step="0.01" min="0" value={form.price} onChange={set("price")} /></label>}
+            <label>Unit<input value={form.unit} onChange={set("unit")} placeholder="pcs, kg, boxes" /></label>
+            <label>Reorder level (blank = shop default)<input type="number" min="0" value={form.reorderLevel} onChange={set("reorderLevel")} /></label>
+            <label>Supplier<input value={form.supplier} onChange={set("supplier")} /></label>
+            <label>Best before<input type="date" value={form.expiry} onChange={set("expiry")} /></label>
+            {!SELLS.includes(item.type) && <label>Used per pizza (automatic)<input type="number" min="0" step="1" value={form.usePerPizza} onChange={set("usePerPizza")} /></label>}
+            {!SELLS.includes(item.type) && <label>…for which size<select value={form.forSize} onChange={set("forSize")}>{SIZE_CHOICES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+            {!SELLS.includes(item.type) && <label>Used per order (automatic)<input type="number" min="0" step="1" value={form.usePerOrder} onChange={set("usePerOrder")} /></label>}
+          </div>
+          <label className="chk"><input type="checkbox" checked={!!form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active (untick to hide this item)</label>
+          <p className="muted" style={{ margin: "6px 0 10px" }}>Hiding an ingredient also hides the menu pizzas that use it. Items used by a menu pizza cannot be renamed.</p>
+          <button className="btn full" disabled={busy} onClick={saveEdit}>Save details</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddItem({ onAdded }) {
+  const blank = { type: "packaging", name: "", stock: "", unit: "pcs", price: "", reorderLevel: "", supplier: "", expiry: "", usePerPizza: "", forSize: "", usePerOrder: "" };
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState(blank);
+  const [m, setM] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const sells = SELLS.includes(f.type);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = (e) => {
+    e.preventDefault();
+    setBusy(true);
+    A("/api/admin/inventory", "POST", f)
+      .then(() => { setF(blank); setM({ ok: true, text: "Item added ✓" }); onAdded(); })
+      .catch((err) => setM({ ok: false, text: err.message }))
+      .finally(() => setBusy(false));
+  };
+  if (!open) return <button className="btn" style={{ marginBottom: 12 }} onClick={() => setOpen(true)}>+ Add item</button>;
+  return (
+    <form className="card eform" onSubmit={save}>
+      <div className="row"><b>New inventory item</b><button type="button" className="pill" onClick={() => setOpen(false)}>Close</button></div>
+      <p className="muted" style={{ margin: "6px 0 10px" }}>
+        {sells ? "This item will appear in the customer's pizza builder straight away." : "Stock-only item: tracked here, not shown to customers."}
+      </p>
+      <div className="fgrid">
+        <label>Category
+          <select value={f.type} onChange={set("type")}>
+            {GROUPS.map(([v, l]) => <option key={v} value={v}>{l.replace(/^\S+\s/, "")}</option>)}
+          </select>
+        </label>
+        <label>Name<input value={f.name} onChange={set("name")} placeholder="e.g. Large pizza box" required /></label>
+        <label>Starting stock<input type="number" min="0" step="1" value={f.stock} onChange={set("stock")} placeholder="0" /></label>
+        <label>Unit<input value={f.unit} onChange={set("unit")} placeholder="pcs, kg, boxes" /></label>
+        {sells && <label>Customer price<input type="number" min="0" step="0.01" value={f.price} onChange={set("price")} placeholder="0.00" /></label>}
+        <label>Reorder level (blank = shop default)<input type="number" min="0" step="1" value={f.reorderLevel} onChange={set("reorderLevel")} /></label>
+        <label>Supplier<input value={f.supplier} onChange={set("supplier")} /></label>
+        <label>Best before<input type="date" value={f.expiry} onChange={set("expiry")} /></label>
+        {!sells && <label>Used per pizza (automatic)<input type="number" min="0" step="1" value={f.usePerPizza} onChange={set("usePerPizza")} placeholder="0" /></label>}
+        {!sells && <label>…for which size<select value={f.forSize} onChange={set("forSize")}>{SIZE_CHOICES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+        {!sells && <label>Used per order (automatic)<input type="number" min="0" step="1" value={f.usePerOrder} onChange={set("usePerOrder")} placeholder="0" /></label>}
+      </div>
+      {!sells && <p className="muted" style={{ margin: "0 0 10px" }}>Example: a pizza box with "1 per pizza" is taken off the stock every time a pizza is ordered. A carry bag with "1 per order" is taken once per order. Leave 0 for items you count by hand.</p>}
+      <button className="btn full" disabled={busy}>{busy ? "Adding..." : "Add item"}</button>
+      <Msg m={m} />
+    </form>
+  );
+}
+
+function StockLogTab() {
+  const [rows, setRows] = useState(null);
+  const [q, setQ] = useState("");
+  const [err, setErr] = useState(null);
+  const load = () => A("/api/admin/stock-log?limit=200").then((r) => { setRows(r); setErr(null); }).catch((e) => setErr({ ok: false, text: e.message }));
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, []);
+  const needle = q.trim().toLowerCase();
+  const shown = (rows || []).filter((r) => !needle || (r.itemName || "").toLowerCase().includes(needle) || (r.note || "").toLowerCase().includes(needle));
+  return (
+    <div>
+      <div className="toolbar">
+        <input placeholder="Search item or note" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search the stock log" />
+        <button className="btn ghost" onClick={() => downloadCsv("/api/admin/stock-log.csv?days=90", "stock-log.csv").catch((e) => setErr({ ok: false, text: e.message }))}>⬇ Download CSV (90 days)</button>
+      </div>
+      <Msg m={err} />
+      {rows === null && !err && <p className="empty">Loading the stock log...</p>}
+      {rows !== null && shown.length === 0 && <p className="empty">No stock movements to show yet.</p>}
+      <div className="logs">
+        {shown.map((r) => (
+          <div className="logrow" key={r._id}>
+            <div className="lg-main">
+              <b>{r.itemName}</b>
+              <span className="muted">{REASON_LABEL[r.reason] || r.reason}{r.note ? " · " + r.note : ""}</span>
+            </div>
+            <div className={"lg-chg " + (r.change > 0 ? "up" : "down")}>{r.change > 0 ? "+" : ""}{r.change}</div>
+            <div className="lg-meta muted">{r.before} → {r.after} · {new Date(r.createdAt).toLocaleString()} · {r.by}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CancelBox({ order, onDone }) {
+  const [open, setOpen] = useState(false);
+  // Ingredients go back by default only if the kitchen has not started yet.
+  const [restock, setRestock] = useState(order.status === "Order Received");
+  const [refund, setRefund] = useState(true);
+  const [note, setNote] = useState("");
+  const [m, setM] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const go_ = () => {
+    setBusy(true);
+    A("/api/admin/orders/" + order._id + "/cancel", "POST", { restock, refund, note })
+      .then((r) => {
+        setM(r.refundError ? { ok: false, text: "Order cancelled, but the refund failed: " + r.refundError + ". Refund it in the Stripe dashboard." } : { ok: true, text: "Order cancelled ✓" });
+        onDone();
+      })
+      .catch((e) => setM({ ok: false, text: e.message }))
+      .finally(() => setBusy(false));
+  };
+  if (!open) return <button className="btn ghost danger" style={{ marginTop: 8 }} onClick={() => setOpen(true)}>Cancel order…</button>;
+  return (
+    <div className="eform">
+      <b>Cancel this order?</b>
+      <label className="chk"><input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} /> Put the ingredients and packaging back in stock</label>
+      <label className="chk"><input type="checkbox" checked={refund} onChange={(e) => setRefund(e.target.checked)} /> Refund {$(order.total)} to the customer (Stripe)</label>
+      <input placeholder="Reason (optional)" maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} />
+      <div className="iactions">
+        <button className="btn danger" disabled={busy} onClick={go_}>{busy ? "Cancelling..." : "Yes, cancel it"}</button>
+        <button className="btn ghost" onClick={() => setOpen(false)}>Keep order</button>
+      </div>
+      <Msg m={m} />
+    </div>
+  );
+}
+
+function ReportTab() {
+  const [days, setDays] = useState(30);
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    setR(null);
+    A("/api/admin/report?days=" + days).then((x) => { setR(x); setErr(null); }).catch((e) => setErr({ ok: false, text: e.message }));
+  }, [days]);
+  const dl = (path, name) => downloadCsv(path, name).catch((e) => setErr({ ok: false, text: e.message }));
+  return (
+    <div>
+      <div className="toolbar">
+        <select value={days} onChange={(e) => setDays(+e.target.value)} aria-label="Report period">
+          <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={365}>Last year</option>
+        </select>
+        <button className="btn ghost" onClick={() => dl("/api/admin/report.csv?days=" + days, "stock-report-" + days + "days.csv")}>⬇ Stock report CSV</button>
+      </div>
+      <Msg m={err} />
+      {!r && !err && <p className="empty">Building the report...</p>}
+      {r && (
+        <div>
+          <div className="stats">
+            <div className="stat"><i>🧾</i><b>{r.orders}</b><span>Paid orders</span></div>
+            <div className="stat"><i>💰</i><b>{$(r.revenue)}</b><span>Sales</span></div>
+            <div className="stat"><i>❌</i><b>{r.cancelled}</b><span>Cancelled</span></div>
+          </div>
+          <h3>Pizzas sold</h3>
+          {r.pizzas.length === 0 && <p className="empty">No sales in this period.</p>}
+          <div className="rtable">
+            {r.pizzas.map((p, i) => <div className="rrow" key={i}><span>{p.name} <span className="muted">({p.size})</span></span><b>{p.count}</b><span className="muted">{$(p.revenue)}</span></div>)}
+          </div>
+          <h3>Stock used</h3>
+          <p className="muted" style={{ marginBottom: 8 }}>Used = taken by customer orders (unpaid and cancelled ones are given back, so they are not counted). Days left is a guess from the average use in this period.</p>
+          <div className="rtable">
+            <div className="rrow head"><span>Item</span><b>Used</b><span>Wasted</span><span>Left</span><span>Days left</span></div>
+            {r.items.filter((i) => i.used || i.wasted || i.delivered).map((i) => (
+              <div className={"rrow" + (i.daysLeft !== null && i.daysLeft <= 3 ? " hot" : "")} key={i.id}>
+                <span>{i.name}</span><b>{i.used}</b><span>{i.wasted}</span><span>{i.stock} {i.unit}</span><span>{i.daysLeft === null ? "–" : i.daysLeft}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -572,6 +841,9 @@ function Admin() {
   const [orders, setOrders] = useState([]);
   const [inv, setInv] = useState([]);
   const [err, setErr] = useState(null);
+  const [q, setQ] = useState("");
+  const [lowOnly, setLowOnly] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
   const { busy, msg, run } = useAsync();
 
   const loadOrders = () => A("/api/admin/orders").then((o) => { setOrders(o); setErr(null); }).catch((e) => setErr({ ok: false, text: e.message }));
@@ -581,7 +853,8 @@ function Admin() {
     if (!authed) return;
     loadOrders(); loadInv();
     const t = setInterval(loadOrders, 5000);
-    return () => clearInterval(t);
+    const t2 = setInterval(loadInv, 30000); // pick up stock taken by customer orders
+    return () => { clearInterval(t); clearInterval(t2); };
   }, [authed]);
 
   const login = (e) => {
@@ -611,10 +884,16 @@ function Admin() {
       </div>
     );
 
+  const live = orders.filter((o) => o.status !== "Cancelled");
   const kitchen = orders.filter((o) => o.status === "In Kitchen").length;
   const delivery = orders.filter((o) => o.status === "Sent to Delivery").length;
-  const lowCount = inv.filter((i) => i.stock < LOW_LIMIT).length;
-  const groups = [["base", "🍞 Pizza bases"], ["sauce", "🥫 Sauces"], ["cheese", "🧀 Cheeses"], ["veggie", "🥬 Vegetables"]];
+  const lowCount = inv.filter((i) => i.active !== false && isLow(i)).length;
+  const needle = q.trim().toLowerCase();
+  const visible = inv.filter((i) =>
+    (showHidden || i.active !== false) &&
+    (!lowOnly || isLow(i)) &&
+    (!needle || i.name.toLowerCase().includes(needle) || (i.supplier || "").toLowerCase().includes(needle))
+  );
 
   return (
     <div className="admin">
@@ -625,7 +904,7 @@ function Admin() {
       </div>
       <div className="wrap wide">
         <div className="stats">
-          <div className="stat"><i>🧾</i><b>{orders.length}</b><span>Paid orders</span></div>
+          <div className="stat"><i>🧾</i><b>{live.length}</b><span>Paid orders</span></div>
           <div className="stat"><i>🔥</i><b>{kitchen}</b><span>In kitchen</span></div>
           <div className="stat"><i>🛵</i><b>{delivery}</b><span>Out for delivery</span></div>
           <div className={"stat" + (lowCount ? " warn" : "")}><i>⚠️</i><b>{lowCount}</b><span>Low stock</span></div>
@@ -634,6 +913,8 @@ function Admin() {
         <div className="tabs">
           <button className={"btn" + (tab === "orders" ? "" : " ghost")} onClick={() => setTab("orders")}>Orders</button>
           <button className={"btn" + (tab === "stock" ? "" : " ghost")} onClick={() => setTab("stock")}>Inventory</button>
+          <button className={"btn" + (tab === "log" ? "" : " ghost")} onClick={() => setTab("log")}>Stock log</button>
+          <button className={"btn" + (tab === "report" ? "" : " ghost")} onClick={() => setTab("report")}>Reports</button>
         </div>
 
         {tab === "orders" && (
@@ -662,8 +943,13 @@ function Admin() {
                         📞 {dl.phone}{dl.note ? <span><br />📝 {dl.note}</span> : null}
                       </div>
                     )}
-                    {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
-                    <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
+                    {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>{p.sizeLabel ? <span className="sztag">{p.sizeLabel}</span> : null}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
+                    {o.status === "Cancelled"
+                      ? <p className="cancelled">❌ Cancelled{o.cancelNote ? ": " + o.cancelNote : ""}{o.refundedAt ? " · refunded" : " · not refunded"}</p>
+                      : <div>
+                          <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
+                          <CancelBox order={o} onDone={() => { loadOrders(); loadInv(); }} />
+                        </div>}
                   </div>
                 );
               })}
@@ -673,118 +959,32 @@ function Admin() {
 
         {tab === "stock" && (
           <div>
-            {groups.map(([type, title]) => (
-              <div key={type}>
-                <h3>{title}</h3>
-                <div className="igrid">
-                  {inv.filter((i) => i.type === type).map((i) => <StockRow key={i._id} item={i} onSaved={loadInv} />)}
+            <div className="toolbar">
+              <input placeholder="Search items or suppliers" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search items" />
+              <label className="chk"><input type="checkbox" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} /> Low stock only</label>
+              <label className="chk"><input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden</label>
+            </div>
+            <AddItem onAdded={loadInv} />
+            {visible.length === 0 && <p className="empty">No items match.</p>}
+            {GROUPS.map(([type, title]) => {
+              const list = visible.filter((i) => i.type === type);
+              if (!list.length) return null;
+              return (
+                <div key={type}>
+                  <h3>{title}</h3>
+                  <div className="igrid">
+                    {list.map((i) => <StockRow key={i._id} item={i} onSaved={loadInv} />)}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
+
+        {tab === "log" && <StockLogTab />}
+        {tab === "report" && <ReportTab />}
       </div>
     </div>
-  );
-}
-
-/* ---------- Floating cart (drag it left / right / anywhere) ---------- */
-function FloatingCart({ cart, setCart }) {
-  const SIZE = 58, GAP = 12;
-  const [open, setOpen] = useState(false);
-  const [pop, setPop] = useState(false);
-  const [drag, setDrag] = useState(null);
-  const [pos, setPos] = useState(() => {
-    try {
-      const s = JSON.parse(localStorage.getItem("pizza_cart_pos"));
-      if (s && (s.side === "left" || s.side === "right") && typeof s.y === "number") return s;
-    } catch (e) {}
-    return { side: "left", y: Math.max(120, window.innerHeight - 170) };
-  });
-  const start = useRef(null);
-  const total = cart.reduce((a, p) => a + p.price, 0);
-  const clampY = (y) => Math.min(Math.max(y, 70), window.innerHeight - SIZE - GAP);
-  const clampX = (x) => Math.min(Math.max(x, 0), window.innerWidth - SIZE);
-
-  // small bounce whenever something is added
-  useEffect(() => {
-    if (!cart.length) return;
-    setPop(true);
-    const t = setTimeout(() => setPop(false), 400);
-    return () => clearTimeout(t);
-  }, [cart.length]);
-
-  const down = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    start.current = { px: e.clientX, py: e.clientY, x: r.left, y: r.top, moved: false, cur: null };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const move = (e) => {
-    const s = start.current;
-    if (!s) return;
-    const dx = e.clientX - s.px, dy = e.clientY - s.py;
-    if (!s.moved && Math.hypot(dx, dy) < 6) return;
-    s.moved = true;
-    s.cur = { x: clampX(s.x + dx), y: clampY(s.y + dy) };
-    setOpen(false);
-    setDrag(s.cur);
-  };
-  const up = () => {
-    const s = start.current;
-    start.current = null;
-    if (!s) return;
-    if (!s.moved) { setOpen((o) => !o); return; }
-    // snap to the nearest side
-    const side = s.cur.x + SIZE / 2 < window.innerWidth / 2 ? "left" : "right";
-    const p = { side, y: s.cur.y };
-    setPos(p);
-    setDrag(null);
-    try { localStorage.setItem("pizza_cart_pos", JSON.stringify(p)); } catch (e) {}
-  };
-
-  const y = clampY(pos.y);
-  const fabStyle = drag ? { left: drag.x, top: drag.y, right: "auto" } : { top: y };
-  const panelStyle = y > window.innerHeight / 2 ? { bottom: window.innerHeight - y + 8 } : { top: y + SIZE + 8 };
-
-  return (
-    <>
-      {open && (
-        <div className={"cart-panel " + pos.side} style={panelStyle}>
-          <div className="cart-panel-head">
-            <b>Your cart ({cart.length})</b>
-            <button onClick={() => setOpen(false)} aria-label="Close">✕</button>
-          </div>
-          <div className="cart-panel-list">
-            {!cart.length && <p className="muted" style={{ padding: "8px 0" }}>Your cart is empty.</p>}
-            {cart.map((p, i) => (
-              <div className="cart-panel-row" key={i}>
-                <div>
-                  <div className="cart-panel-name">{p.name}</div>
-                  <span className="price">{$(p.price)}</span>
-                </div>
-                <button onClick={() => setCart(cart.filter((_, x) => x !== i))} aria-label="Remove">🗑</button>
-              </div>
-            ))}
-          </div>
-          {cart.length > 0 && <div className="cart-panel-total"><span>Total</span><b>{$(total)}</b></div>}
-          {cart.length > 0
-            ? <button className="btn full" onClick={() => { setOpen(false); go("cart"); }}>Checkout</button>
-            : <button className="btn full" onClick={() => { setOpen(false); go("dashboard"); }}>Browse pizzas</button>}
-        </div>
-      )}
-      <button
-        className={"cart-fab " + pos.side + (pop ? " pop" : "")}
-        style={fabStyle}
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerCancel={up}
-        aria-label="Cart (drag to move)"
-      >
-        🛒
-        {cart.length > 0 && <span className="cart-count">{cart.length}</span>}
-      </button>
-    </>
   );
 }
 
@@ -816,7 +1016,9 @@ function App() {
         .then(() => { setCart([]); setBanner({ ok: true, text: "Payment successful! Your order is in." }); go("orders"); })
         .catch((e) => setBanner({ ok: false, text: e.message }));
     } else if (q.get("cancelled")) {
+      const cancelledId = q.get("cancelled");
       history.replaceState(null, "", location.pathname);
+      if (cancelledId !== "1") call("/api/orders/cancel", "POST", { orderId: cancelledId }).catch(() => {});
       setBanner({ ok: false, text: "Payment cancelled." });
       go("cart");
     }
@@ -837,7 +1039,7 @@ function App() {
     page = <AuthPage key={mode} mode={mode} onLogin={setUser} />;
   } else if (!opts) page = <p className="empty">Loading menu (the server may be waking up)...</p>;
   else if (route === "build") page = <Builder opts={opts} addToCart={addToCart} />;
-  else if (route === "cart") page = <Cart cart={cart} setCart={setCart} />;
+  else if (route === "cart") page = <Cart cart={cart} setCart={setCart} opts={opts} />;
   else if (route === "orders") page = <Orders />;
   else page = <Menu opts={opts} addToCart={addToCart} name={user} />;
 
@@ -849,7 +1051,6 @@ function App() {
       {page}
       {!isAdmin && <Footer />}
       {!isAdmin && <Chatbot />}
-      {!isAdmin && user && opts && route !== "cart" && <FloatingCart cart={cart} setCart={setCart} />}
     </div>
   );
 }
