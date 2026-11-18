@@ -20,7 +20,7 @@ A full-stack pizza ordering and inventory management platform with separate User
 |---|---|
 | **Name** | Aaron Addo |
 | **Track** | Web Development & Designing |
-| **Level** | 3 (chosen level: Level 3 has a single task, which is this project) |
+| **Level** | 3 |
 | **Task** | Pizza Delivery Full-Stack Application |
 | **Email** | aaronaddo846@gmail.com |
 | **GitHub** | [lhelnaldo123-hub](https://github.com/lhelnaldo123-hub) |
@@ -54,8 +54,6 @@ A full-stack pizza ordering and inventory management platform with separate User
 - ✅ **Order summary** page before payment
 - ✅ **Stripe Checkout** in test mode
 - ✅ **Live order status** tracker: *Order Received → In Kitchen → Sent to Delivery* (refreshes every 5 seconds)
-- ✅ **Floating cart**: a draggable 🛒 button with a live item count. Drag it left or right (or anywhere); it snaps to the nearest side and remembers its position. Tap it to open a mini cart with the pizzas, remove buttons, the total and a Checkout button
-- ✅ **Side menu**: a ☰ button opens a slide-in menu with the same links as the top bar (Menu, Build, Orders, Support, Cart, Log out), with the current page highlighted
 - ✅ Customer service page with FAQ, contact details and a message form
 - ✅ **Pizzabot**, a built-in FAQ chat assistant
 
@@ -92,6 +90,17 @@ A full-stack pizza ordering and inventory management platform with separate User
 OIBSIP/
 └── WebDev-L3-PizzaDelivery/
     ├── README.md
+    ├── screenshots/
+    │   ├── login.png
+    │   ├── menu.png
+    │   ├── builder.png
+    │   ├── cart.png
+    │   ├── checkout.png
+    │   ├── tracking.png
+    │   ├── admin-orders.png
+    │   ├── admin-inventory.png
+    │   ├── floating-cart.png
+    │   └── side-menu.png
     ├── backend/
     │   ├── package.json
     │   ├── server.js          # Express app and startup
@@ -107,11 +116,10 @@ OIBSIP/
     └── frontend/
         ├── index.html
         ├── style.css
-        ├── app.js             # All React components (incl. Header, side menu, FloatingCart)
+        ├── app.js             # All React components
         ├── images.js          # Pizza photo links
         ├── config.js          # API URL
         └── title-card.html    # Video title card
-    └── screenshots/           # Project screenshots used in this README
 ```
 
 ---
@@ -200,28 +208,26 @@ The chat assistant is a built-in rule-based FAQ bot, not a live AI model.
 
 ## 📸 Screenshots
 
-_Add your screenshots to a `screenshots/` folder and link them here._
+The screenshots below are stored in the repository's `screenshots/` folder. GitHub will display them automatically when the image files are uploaded with these exact names.
 
-| Screen | Image |
+| Screen | Screenshot |
 |---|---|
-| Login | `screenshots/login.png` |
-| Menu | `screenshots/menu.png` |
-| Pizza builder | `screenshots/builder.png` |
-| Order summary | `screenshots/cart.png` |
-| Stripe checkout | `screenshots/checkout.png` |
-| Order tracking | `screenshots/tracking.png` |
-| Admin orders | `screenshots/admin-orders.png` |
-| Admin inventory | `screenshots/admin-inventory.png` |
-| Floating cart (open) | `screenshots/floating-cart.png` |
-| Side menu | `screenshots/side-menu.png` |
+| Login | ![Login](screenshots/login.png) |
+| Menu | ![Menu](screenshots/menu.png) |
+| Pizza builder | ![Pizza builder](screenshots/builder.png) |
+| Order summary | ![Order summary](screenshots/cart.png) |
+| Stripe checkout | ![Stripe checkout](screenshots/checkout.png) |
+| Order tracking | ![Order tracking](screenshots/tracking.png) |
+| Admin orders | ![Admin orders](screenshots/admin-orders.png) |
+| Admin inventory | ![Admin inventory](screenshots/admin-inventory.png) |
+| Floating cart (open) | ![Floating cart open](screenshots/floating-cart.png) |
+| Side menu | ![Side menu](screenshots/side-menu.png) |
 
 ---
 
 ## 🎥 Demo Video
 
 _Add your LinkedIn post link here after you post it._
-
-The video starts with a 2-second title card (full name, track and task title) and then shows the app working end to end: sign up, verify, build a pizza, pay with a Stripe test card, track the order, and the admin side (orders, stock and low-stock alert).
 
 ---
 
