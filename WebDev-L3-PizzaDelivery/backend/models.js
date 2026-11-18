@@ -47,9 +47,24 @@ const Order = mongoose.model("Order", new Schema({
   stripeSession: String,
   cancelledAt: Date,
   cancelNote: String,
+  cancelledBy: String,                            // "customer" or "admin"
+  cancelReason: String,                           // reason chosen by the customer
+  refundError: String,                            // set when an automatic refund failed (admin must refund by hand)
   refundId: String,
   refundedAt: Date,
 }, { timestamps: true }));
+
+// A customer's review of one pizza from one DELIVERED order (one review per order line).
+const Review = mongoose.model("Review", new Schema({
+  user: { type: Schema.Types.ObjectId, ref: "User", index: true },
+  userName: String,
+  order: { type: Schema.Types.ObjectId, ref: "Order", index: true },
+  line: Number,                                   // index of the pizza inside order.pizzas
+  pizza: { type: String, index: true },           // menu pizza name, e.g. "Margherita"
+  rating: { type: Number, min: 1, max: 5 },
+  comment: { type: String, default: "" },
+}, { timestamps: true }));
+Review.schema.index({ order: 1, line: 1 }, { unique: true });
 
 // One row per stock movement: who, when, how much, before/after and why.
 const StockLog = mongoose.model("StockLog", new Schema({
@@ -68,4 +83,4 @@ const StockLog = mongoose.model("StockLog", new Schema({
   order: { type: Schema.Types.ObjectId, ref: "Order" },
 }, { timestamps: { createdAt: true, updatedAt: false } }));
 
-module.exports = { User, Inventory, Order, StockLog, ITEM_TYPES, CUSTOMER_TYPES, STOCK_ONLY_TYPES };
+module.exports = { User, Inventory, Order, Review, StockLog, ITEM_TYPES, CUSTOMER_TYPES, STOCK_ONLY_TYPES };
