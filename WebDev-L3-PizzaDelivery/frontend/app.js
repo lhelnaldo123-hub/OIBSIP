@@ -159,6 +159,7 @@ function Header({ user, cartCount, logout, theme, toggleTheme }) {
           <button className="drawer-x" onClick={close} aria-label="Close menu">✕</button>
         </div>
         {user && <p className="drawer-hi">Hi, {user} 👋</p>}
+        {open && KITCHEN_CLIPS.length > 0 && !REDUCE_MOTION && <DrawerReel />}
         <div className="drawer-links">
           {links.map(([href, icon, label]) => (
             <a key={href} href={href} onClick={close}>
@@ -624,7 +625,7 @@ function Reset({ token }) {
 /* ---------- Videos (put the files in frontend/videos/) ---------- */
 // Homepage background: someone packaging pizza. Set to "" to turn it off.
 const HERO_VIDEO = "videos/packaging.mp4";
-// "Inside our kitchen" clips on the menu page. Add, remove or rename as you like. A missing file is simply skipped.
+// Kitchen clips shown in the ☰ side menu. Add, remove or rename as you like. A missing file is simply skipped.
 const KITCHEN_CLIPS = [
   { src: "videos/chef-dough.mp4", title: "Fresh dough, made by hand" },
   { src: "videos/chef-toppings.mp4", title: "Toppings added with care" },
@@ -647,14 +648,19 @@ function LoopVideo({ src, cls, onBad }) {
   return <video ref={ref} className={cls} src={src} muted loop playsInline autoPlay preload="metadata" onError={() => { setBad(true); if (onBad) onBad(); }} />;
 }
 
-function KitchenClip({ src, title }) {
-  const [bad, setBad] = useState(false);
-  if (bad) return null;
+// Plays the kitchen clips one after another inside the side menu. It only loads while the menu is open.
+function DrawerReel() {
+  const [i, setI] = useState(0);
+  const [bad, setBad] = useState([]);
+  const good = KITCHEN_CLIPS.filter((c) => !bad.includes(c.src));
+  if (!good.length) return null;
+  const k = good[i % good.length];
   return (
-    <figure className="kclip">
-      <LoopVideo src={src} cls="kvid" onBad={() => setBad(true)} />
-      <figcaption>{title}</figcaption>
-    </figure>
+    <div className="reel">
+      <video key={k.src + i} src={k.src} muted playsInline autoPlay preload="metadata"
+        onEnded={() => setI((n) => n + 1)} onError={() => setBad((b) => [...b, k.src])} />
+      <span>👨‍🍳 {k.title}</span>
+    </div>
   );
 }
 
@@ -696,12 +702,6 @@ function Menu({ opts, addToCart, name, favs = [], toggleFav }) {
           <div><b>💳</b><strong>2. Pay</strong>Secure card checkout</div>
           <div><b>🛵</b><strong>3. Track</strong>Watch it go from kitchen to door</div>
         </div>
-        {KITCHEN_CLIPS.length > 0 && (
-          <>
-            <h2>👨‍🍳 Inside our kitchen</h2>
-            <div className="kitchen">{KITCHEN_CLIPS.map((k) => <KitchenClip key={k.src} src={k.src} title={k.title} />)}</div>
-          </>
-        )}
         <h2>Our pizzas</h2>
         <div className="grid">
           {opts.varieties.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={favs.includes(v.name)} toggleFav={toggleFav} />)}
