@@ -1,7 +1,7 @@
 const { useState, useEffect, useRef } = React;
 const API = window.API_URL.replace(/\/$/, "");
 const $ = (n) => "$" + Number(n).toFixed(2);
-const STATUSES = ["Order Received", "In Kitchen", "Sent to Delivery"];
+const STATUSES = ["Order Received", "In Kitchen", "Sent to Delivery", "Delivered"];
 const LOW_FALLBACK = 20; // only used if the server sends no reorder level
 const isLow = (i) => i.stock < (i.reorderLevel !== undefined && i.reorderLevel !== null ? i.reorderLevel : LOW_FALLBACK);
 const go = (h) => { location.hash = h; };
@@ -321,6 +321,7 @@ const OFFERS = [
 ];
 
 function Favourites({ opts, addToCart, favs, toggleFav }) {
+  const reviews = useReviews();
   const list = opts.varieties.filter((v) => favs.includes(v.name));
   return (
     <div className="wrap wide">
@@ -332,7 +333,7 @@ function Favourites({ opts, addToCart, favs, toggleFav }) {
         </>
       )}
       <div className="grid">
-        {list.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={true} toggleFav={toggleFav} />)}
+        {list.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={true} toggleFav={toggleFav} reviews={reviews} />)}
       </div>
     </div>
   );
@@ -664,8 +665,18 @@ function DrawerReel() {
   );
 }
 
-function PizzaCard({ v, opts, addToCart, fav, toggleFav }) {
+/* ---- reviews shown on the menu (written by customers after delivery) ---- */
+function useReviews() {
+  const [rv, setRv] = useState({});
+  useEffect(() => { call("/api/orders/reviews").then(setRv).catch(() => {}); }, []);
+  return rv;
+}
+const Stars = ({ n }) => <span className="stars" aria-label={n + " out of 5"}>{[1, 2, 3, 4, 5].map((i) => <i key={i} className={i <= Math.round(n) ? "on" : ""}>★</i>)}</span>;
+
+function PizzaCard({ v, opts, addToCart, fav, toggleFav, reviews }) {
   const [size, setSize] = useState("R");
+  const [showRv, setShowRv] = useState(false);
+  const r = reviews && reviews[v.name];
   return (
     <div className="pcard">
       <Photo src={imgFor(v.name)} alt={v.name} />
@@ -673,6 +684,10 @@ function PizzaCard({ v, opts, addToCart, fav, toggleFav }) {
         <div className="row"><b>{v.name}</b><span>{toggleFav && <button className="heart" onClick={() => toggleFav(v.name)} aria-label={fav ? "Remove from favourites" : "Save to favourites"}>{fav ? "❤️" : "🤍"}</button>} <span className="price">{$(priceFor(opts, v, size))}</span></span></div>
         <p className="muted">{v.desc}</p>
         <p className="muted">{v.labels}</p>
+        {r
+          ? <button className="rvlink" onClick={() => setShowRv(!showRv)}><Stars n={r.avg} /> <b>{r.avg.toFixed(1)}</b> · {r.count} review{r.count > 1 ? "s" : ""} {r.recent.length ? (showRv ? "▴" : "▾") : ""}</button>
+          : <p className="muted rvnone">No reviews yet</p>}
+        {showRv && r && r.recent.map((x, i) => <div className="rvitem" key={i}><Stars n={x.rating} /> <b>{x.name}</b><p>{x.comment}</p></div>)}
         <SizePicker opts={opts} value={size} onChange={setSize} base={v.price} minStock={v.minStock} />
         <button className="btn full" style={{ marginTop: 8 }} disabled={v.soldOut} onClick={() => addToCart({ ...v, size })}>{v.soldOut ? "Sold out" : "Add to cart"}</button>
       </div>
@@ -681,6 +696,7 @@ function PizzaCard({ v, opts, addToCart, fav, toggleFav }) {
 }
 
 function Menu({ opts, addToCart, name, favs = [], toggleFav }) {
+  const reviews = useReviews();
   return (
     <div>
       <div className="hero" style={{ backgroundImage: "url(" + window.HERO_IMG + ")" }}>
@@ -704,7 +720,7 @@ function Menu({ opts, addToCart, name, favs = [], toggleFav }) {
         </div>
         <h2>Our pizzas</h2>
         <div className="grid">
-          {opts.varieties.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={favs.includes(v.name)} toggleFav={toggleFav} />)}
+          {opts.varieties.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={favs.includes(v.name)} toggleFav={toggleFav} reviews={reviews} />)}
         </div>
         <button className="btn alt full" style={{ marginTop: 20 }} onClick={() => go("build")}>🍕 Build your own pizza</button>
       </div>
@@ -854,11 +870,72 @@ function Cart({ cart, setCart, opts }) {
 }
 
 /* ---------- My orders ---------- */
+const CANCEL_REASONS = ["Ordered by mistake", "Wrong address or phone number", "Changed my mind", "Want to change my pizza", "Delivery will take too long", "Other"]; // keep in step with backend/routes/orders.js
+const MENU_PIZZAS = ["Margherita", "Farmhouse", "BBQ Veggie", "Pesto Delight", "Spicy Garden"]; // only these can be reviewed (they show on the menu)
+
+// Customer cancels an order that the kitchen has not started yet.
+function CancelOrder({ order, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [m, setM] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const send = () => {
+    setBusy(true); setM(null);
+    call("/api/orders/" + order._id + "/cancel", "POST", { reason, note })
+      .then((r) => { setOpen(false); onDone(r.refunded ? "Order cancelled. Your refund is on its way." : "Order cancelled. We could not refund automatically, so we will refund you by hand."); })
+      .catch((e) => setM({ ok: false, text: e.message }))
+      .finally(() => setBusy(false));
+  };
+  if (!open) return <button className="btn ghost danger full" style={{ marginTop: 8 }} onClick={() => setOpen(true)}>Cancel this order</button>;
+  return (
+    <div className="eform">
+      <b>Why are you cancelling?</b>
+      <div className="reasons">
+        {CANCEL_REASONS.map((r) => <label className="chk" key={r}><input type="radio" name={"why" + order._id} checked={reason === r} onChange={() => setReason(r)} /> {r}</label>)}
+      </div>
+      {reason === "Other" && <input placeholder="Tell us why" maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} />}
+      <p className="muted">Your ingredients are released and the full amount is refunded.</p>
+      <div className="iactions">
+        <button className="btn danger" disabled={!reason || busy} onClick={send}>{busy ? "Cancelling..." : "Cancel order"}</button>
+        <button className="btn ghost" onClick={() => setOpen(false)}>Keep order</button>
+      </div>
+      <Msg m={m} />
+    </div>
+  );
+}
+
+// Star rating + comment for one pizza of a delivered order.
+function ReviewForm({ order, line, pizza, existing, onDone }) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [m, setM] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (existing) return <div className="rvdone">✅ You rated {pizza.name}: <Stars n={existing.rating} />{existing.comment ? <p className="muted">“{existing.comment}”</p> : null}</div>;
+  if (!MENU_PIZZAS.includes(pizza.name)) return null;
+  const send = () => {
+    setBusy(true); setM(null);
+    call("/api/orders/" + order._id + "/review", "POST", { line, rating, comment })
+      .then(() => onDone())
+      .catch((e) => setM({ ok: false, text: e.message }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="rvform">
+      <b>How was your {pizza.name}?</b>
+      <div className="rate">{[1, 2, 3, 4, 5].map((n) => <button key={n} className={n <= rating ? "on" : ""} onClick={() => setRating(n)} aria-label={n + " stars"}>★</button>)}</div>
+      <textarea rows={2} maxLength={300} placeholder="Write a short review (optional). It will show on the menu." value={comment} onChange={(e) => setComment(e.target.value)} />
+      <button className="btn" disabled={!rating || busy} onClick={send}>{busy ? "Sending..." : "Post review"}</button>
+      <Msg m={m} />
+    </div>
+  );
+}
+
 function Orders({ opts, addToCart }) {
   const [orders, setOrders] = useState(null);
   const [err, setErr] = useState(null);
-  const [ratings, setRatings] = useState(() => readJSON("pizza_ratings", {}));
-  const rate = (id, n) => { const r = { ...ratings, [id]: n }; setRatings(r); saveJSON("pizza_ratings", r); };
+  const [tab, setTab] = useState("pending");
+  const load = () => call("/api/orders/mine").then(setOrders).catch((e) => setErr({ ok: false, text: e.message }));
   const reorder = (o) => {
     const found = (type, n) => opts[type].find((i) => i.name === n);
     let added = 0, missed = 0;
@@ -880,18 +957,32 @@ function Orders({ opts, addToCart }) {
     else setErr({ ok: false, text: "Sorry, those items are not available right now." });
   };
   useEffect(() => {
-    const load = () => call("/api/orders/mine").then(setOrders).catch((e) => setErr({ ok: false, text: e.message }));
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, []);
+
+  const groups = {
+    pending: (orders || []).filter((o) => o.status !== "Delivered" && o.status !== "Cancelled"),
+    delivered: (orders || []).filter((o) => o.status === "Delivered"),
+    cancelled: (orders || []).filter((o) => o.status === "Cancelled"),
+  };
+  const list = groups[tab];
+  const toReview = groups.delivered.filter((o) => o.pizzas.some((p, i) => MENU_PIZZAS.includes(p.name) && !o.reviews.some((r) => r.line === i))).length;
+  const empty = { pending: "No orders on the way right now.", delivered: "Nothing delivered yet. Once your pizza arrives you can review it here.", cancelled: "No cancelled orders." };
+
   return (
     <div className="wrap">
       <h2>My orders</h2>
       <p className="muted" style={{ marginBottom: 10 }}>Updates automatically</p>
+      <div className="tabs">
+        <button className={"btn" + (tab === "pending" ? "" : " ghost")} onClick={() => setTab("pending")}>On the way ({groups.pending.length})</button>
+        <button className={"btn" + (tab === "delivered" ? "" : " ghost")} onClick={() => setTab("delivered")}>Delivered ({groups.delivered.length}){toReview ? " ⭐" : ""}</button>
+        <button className={"btn" + (tab === "cancelled" ? "" : " ghost")} onClick={() => setTab("cancelled")}>Cancelled ({groups.cancelled.length})</button>
+      </div>
       <Msg m={err} />
-      {orders && orders.length === 0 && <p className="empty">No orders yet.</p>}
-      {orders && orders.map((o) => {
+      {orders && list.length === 0 && <p className="empty">{empty[tab]}</p>}
+      {list.map((o) => {
         const idx = STATUSES.indexOf(o.status);
         return (
           <div className="card" key={o._id}>
@@ -899,14 +990,13 @@ function Orders({ opts, addToCart }) {
             {o.pizzas.map((p, i) => <p className="muted" key={i}>🍕 {p.name}{p.sizeLabel && p.sizeLabel !== "Regular" ? " (" + p.sizeLabel + ")" : ""}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</p>)}
             {o.delivery && o.delivery.address && <p className="muted" style={{ marginTop: 6 }}>📍 {place(o.delivery)}</p>}
             {o.status === "Cancelled"
-              ? <p className="cancelled">❌ This order was cancelled{o.refundedAt ? ". Your payment has been refunded; your bank may take a few days to show it." : ". If you were charged, please contact us."}</p>
+              ? <p className="cancelled">❌ {o.cancelledBy === "customer" ? "You cancelled this order" + (o.cancelReason ? " (" + o.cancelReason + ")" : "") : "This order was cancelled by the shop" + (o.cancelNote ? ": " + o.cancelNote : "")}{o.refundedAt ? ". Your payment has been refunded; your bank may take a few days to show it." : ". If you were charged, please contact us."}</p>
               : <div className="track">{STATUSES.map((s, i) => <span key={s} className={i <= idx ? "on" : ""}>{s}</span>)}</div>}
-            {o.status === "Sent to Delivery" && (
-              <div className="rate">
-                <span className="muted">{ratings[o._id] ? "Your rating:" : "Rate this order:"}</span>
-                {[1, 2, 3, 4, 5].map((n) => <button key={n} className={n <= (ratings[o._id] || 0) ? "on" : ""} onClick={() => rate(o._id, n)} aria-label={n + " stars"}>★</button>)}
-              </div>
-            )}
+            {o.status === "Order Received" && <CancelOrder order={o} onDone={(t) => { setErr({ ok: true, text: t }); load(); }} />}
+            {o.status === "In Kitchen" && <p className="muted" style={{ marginTop: 8 }}>🔥 The kitchen is making your pizza, so it can no longer be cancelled.</p>}
+            {o.status === "Delivered" && o.pizzas.map((p, i) => (
+              <ReviewForm key={i} order={o} line={i} pizza={p} existing={o.reviews.find((r) => r.line === i)} onDone={() => { setErr({ ok: true, text: "Thanks! Your review is now on the menu." }); load(); }} />
+            ))}
             {o.status !== "Cancelled" && opts && <button className="btn ghost full" style={{ marginTop: 10 }} onClick={() => reorder(o)}>🔁 Reorder</button>}
           </div>
         );
@@ -1302,7 +1392,7 @@ function Admin() {
                     )}
                     {o.pizzas.map((p, i) => <div className="pline" key={i}>🍕 <b>{p.name}</b>{p.sizeLabel ? <span className="sztag">{p.sizeLabel}</span> : null}: {p.base}, {p.sauce}, {p.cheese}{p.veggies.length ? ", " + p.veggies.join(", ") : ""}</div>)}
                     {o.status === "Cancelled"
-                      ? <p className="cancelled">❌ Cancelled{o.cancelNote ? ": " + o.cancelNote : ""}{o.refundedAt ? " · refunded" : " · not refunded"}</p>
+                      ? <p className="cancelled">❌ Cancelled by {o.cancelledBy || "admin"}{o.cancelReason ? " · " + o.cancelReason : ""}{o.cancelNote ? ": " + o.cancelNote : ""}{o.refundedAt ? " · refunded" : " · NOT refunded"}{o.refundError ? " (refund failed: " + o.refundError + ")" : ""}</p>
                       : <div>
                           <div className="statusbtns">{STATUSES.map((s) => <button key={s} className={o.status === s ? "on" : ""} onClick={() => setStatus(o._id, s)}>{s}</button>)}</div>
                           <CancelBox order={o} onDone={() => { loadOrders(); loadInv(); }} />
@@ -1371,7 +1461,7 @@ function App() {
       if (seen.current) {
         list.forEach((o) => {
           if (seen.current[o._id] && seen.current[o._id] !== o.status) {
-            const text = o.status === "Cancelled" ? "Your order was cancelled." : "Your order is now: " + o.status;
+            const text = o.status === "Cancelled" ? "Your order was cancelled." : o.status === "Delivered" ? "Your pizza was delivered! Enjoy, and leave a review in My orders." : "Your order is now: " + o.status;
             setBanner({ ok: o.status !== "Cancelled", text });
             try { if ("Notification" in window && Notification.permission === "granted") new Notification("Slice & Co.", { body: text }); } catch (e) {}
           }
