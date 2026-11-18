@@ -5,6 +5,7 @@ const connectDB = require("./config/db");
 const { seed, startJobs } = require("./jobs");
 
 const app = express();
+app.set("trust proxy", 1); // behind Render's proxy, so req.ip is the visitor's address
 app.use(cors());
 app.use(express.json());
 
