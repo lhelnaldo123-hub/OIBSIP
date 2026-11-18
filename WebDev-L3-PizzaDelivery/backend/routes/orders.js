@@ -1,8 +1,10 @@
 const router = require("express").Router();
-const { Inventory, Order, User } = require("../models");
+const mongoose = require("mongoose");
+const { Inventory, Order, User, Review } = require("../models");
 const { auth } = require("../auth");
 const { checkLowStock, getStripe } = require("../jobs");
-const { reserve, releaseOrder, finalizePaid } = require("../stock");
+const { reserve, releaseOrder, finalizePaid, cancelPaidOrder } = require("../stock");
+const { refundOrder } = require("../refund");
 const { VARIETIES } = require("../varieties");
 const { SIZES, sizeOf } = require("../sizes");
 const { STOCK_ONLY_TYPES } = require("../models");
@@ -190,9 +192,90 @@ router.post("/cancel", auth, async (req, res) => {
   }
 });
 
+// Orders of the logged-in customer, with the reviews they already wrote (so the page can hide the form).
 router.get("/mine", auth, async (req, res) => {
   try {
-    res.json(await Order.find({ user: req.user.id, paid: true }).sort({ createdAt: -1 }).limit(30));
+    const orders = await Order.find({ user: req.user.id, paid: true }).sort({ createdAt: -1 }).limit(30);
+    const reviews = await Review.find({ order: { $in: orders.map((o) => o._id) } });
+    res.json(orders.map((o) => ({
+      ...o.toObject(),
+      reviews: reviews.filter((r) => String(r.order) === String(o._id)).map((r) => ({ line: r.line, rating: r.rating, comment: r.comment })),
+    })));
+  } catch (e) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---- Customer cancels a paid order -----------------------------------------------------------
+// Allowed only while the kitchen has not started ("Order Received"). The stock goes back
+// automatically and the payment is refunded; if the refund fails the admin sees a warning.
+const CANCEL_REASONS = [
+  "Ordered by mistake", "Wrong address or phone number", "Changed my mind",
+  "Want to change my pizza", "Delivery will take too long", "Other",
+];
+router.get("/cancel-reasons", (req, res) => res.json(CANCEL_REASONS));
+
+router.post("/:id/cancel", auth, async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Bad order id" });
+    const reason = String((req.body || {}).reason || "");
+    const note = String((req.body || {}).note || "").trim().slice(0, 200);
+    if (!CANCEL_REASONS.includes(reason)) return res.status(400).json({ error: "Please choose a reason" });
+    if (reason === "Other" && note.length < 3) return res.status(400).json({ error: "Please tell us the reason" });
+    const mine = await Order.findOne({ _id: req.params.id, user: req.user.id, paid: true });
+    if (!mine) return res.status(404).json({ error: "Order not found" });
+    if (mine.status !== "Order Received")
+      return res.status(400).json({ error: mine.status === "Cancelled" ? "This order is already cancelled" : "The kitchen has already started this order, so it can no longer be cancelled. Please call us." });
+    const order = await cancelPaidOrder(mine._id, { restock: true, note, reason, by: "customer", cancelledBy: "customer", onlyStatus: "Order Received" });
+    if (!order) return res.status(400).json({ error: "The kitchen has just started this order, so it can no longer be cancelled." });
+    let refunded = true;
+    try { await refundOrder(order); }
+    catch (e) { refunded = false; order.refundError = e.message; await order.save(); }
+    checkLowStock().catch(() => {});
+    res.json({ order, refunded });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---- Reviews ---------------------------------------------------------------------------------
+// Only a delivered order can be reviewed, only by its owner, once per pizza, and only for menu pizzas
+// (those are the ones shown on the menu page).
+router.post("/:id/review", auth, async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Bad order id" });
+    const b = req.body || {};
+    const rating = Number(b.rating), line = Number(b.line);
+    const comment = String(b.comment || "").trim().slice(0, 300);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Choose 1 to 5 stars" });
+    const order = await Order.findOne({ _id: req.params.id, user: req.user.id, paid: true });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (order.status !== "Delivered") return res.status(400).json({ error: "You can review a pizza once it has been delivered" });
+    const p = Number.isInteger(line) ? order.pizzas[line] : null;
+    if (!p) return res.status(400).json({ error: "Pizza not found in this order" });
+    if (!VARIETIES.some((v) => v.name === p.name)) return res.status(400).json({ error: "Only menu pizzas can be reviewed" });
+    const user = await User.findById(req.user.id).select("name");
+    const review = await Review.create({ user: req.user.id, userName: (user && user.name || "Customer").split(" ")[0], order: order._id, line, pizza: p.name, rating, comment });
+    res.status(201).json(review);
+  } catch (e) {
+    res.status(e.code === 11000 ? 400 : 500).json({ error: e.code === 11000 ? "You already reviewed this pizza" : "Server error" });
+  }
+});
+
+// Public summary for the menu: average, count and the newest 3 comments for every pizza.
+router.get("/reviews", async (req, res) => {
+  try {
+    const [stats, recent] = await Promise.all([
+      Review.aggregate([{ $group: { _id: "$pizza", avg: { $avg: "$rating" }, count: { $sum: 1 } } }]),
+      Review.find({ comment: { $ne: "" } }).sort({ createdAt: -1 }).limit(60),
+    ]);
+    const out = {};
+    stats.forEach((s) => { out[s._id] = { avg: Math.round(s.avg * 10) / 10, count: s.count, recent: [] }; });
+    recent.forEach((r) => {
+      const o = out[r.pizza];
+      if (o && o.recent.length < 3) o.recent.push({ name: r.userName, rating: r.rating, comment: r.comment, date: r.createdAt });
+    });
+    res.json(out);
   } catch (e) {
     res.status(500).json({ error: "Server error" });
   }
