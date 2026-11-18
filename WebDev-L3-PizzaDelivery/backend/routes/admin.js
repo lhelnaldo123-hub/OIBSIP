@@ -1,14 +1,14 @@
 const router = require("express").Router();
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
-const { User, Inventory, Order, StockLog, ITEM_TYPES, STOCK_ONLY_TYPES } = require("../models");
+const { User, Inventory, Order, Review, StockLog, ITEM_TYPES, STOCK_ONLY_TYPES } = require("../models");
 const { sign, auth, adminOnly } = require("../auth");
 const { checkLowStock } = require("../jobs");
 const { adjust, levelOf, cancelPaidOrder, shortId } = require("../stock");
 const { usedByMenu } = require("../varieties");
 const { SIZES } = require("../sizes");
 const { failLimiter } = require("../rateLimit");
-const { getStripe } = require("../jobs");
+const { refundOrder } = require("../refund");
 
 // 8 wrong passwords from one address and it is locked out for 15 minutes.
 const loginLimit = failLimiter({ max: 8, windowMs: 15 * 60 * 1000 });
@@ -220,7 +220,7 @@ router.get("/orders", async (req, res) => {
 router.put("/orders/:id", async (req, res) => {
   const { status } = req.body || {};
   if (!okId(req.params.id)) return bad(res, "Bad order id");
-  if (!["Order Received", "In Kitchen", "Sent to Delivery"].includes(status))
+  if (!["Order Received", "In Kitchen", "Sent to Delivery", "Delivered"].includes(status))
     return res.status(400).json({ error: "Bad status" });
   // A cancelled order stays cancelled.
   const o = await Order.findOneAndUpdate({ _id: req.params.id, paid: true, status: { $ne: "Cancelled" } }, { status }, { new: true });
@@ -243,15 +243,11 @@ router.post("/orders/:id/cancel", async (req, res) => {
     let refundError = "";
     if (b.refund && !order.refundId) {
       try {
-        const stripe = getStripe();
-        const session = await stripe.checkout.sessions.retrieve(order.stripeSession);
-        if (!session.payment_intent) throw new Error("No payment found for this order");
-        const refund = await stripe.refunds.create({ payment_intent: session.payment_intent }, { idempotencyKey: "refund-" + order._id });
-        order.refundId = refund.id;
-        order.refundedAt = new Date();
-        await order.save();
+        await refundOrder(order);
       } catch (e) {
         refundError = e.message;
+        order.refundError = e.message;
+        await order.save();
       }
     }
     checkLowStock().catch(() => {});
@@ -259,6 +255,16 @@ router.post("/orders/:id/cancel", async (req, res) => {
   } catch (e) {
     bad(res, e.message);
   }
+});
+
+// Reviews: list the latest and delete one (moderation).
+router.get("/reviews", async (req, res) => {
+  res.json(await Review.find().sort({ createdAt: -1 }).limit(100));
+});
+router.delete("/reviews/:id", async (req, res) => {
+  if (!okId(req.params.id)) return bad(res, "Bad review id");
+  await Review.deleteOne({ _id: req.params.id });
+  res.json({ ok: true });
 });
 
 // ---- Reports -------------------------------------------------------------------------------
