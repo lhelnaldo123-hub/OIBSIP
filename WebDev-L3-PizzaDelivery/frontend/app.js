@@ -5,12 +5,15 @@ const STATUSES = ["Order Received", "In Kitchen", "Sent to Delivery"];
 const LOW_FALLBACK = 20; // only used if the server sends no reorder level
 const isLow = (i) => i.stock < (i.reorderLevel !== undefined && i.reorderLevel !== null ? i.reorderLevel : LOW_FALLBACK);
 const go = (h) => { location.hash = h; };
+const readJSON = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v === null || v === undefined ? d : v; } catch (e) { return d; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 const imgFor = (name) => (window.PIZZA_IMG && window.PIZZA_IMG[name]) || window.DEFAULT_IMG;
 
 const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo (DRC)","Congo (Republic)","Costa Rica","Côte d'Ivoire","Croatia","Cuba","Cyprus","Czechia","Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","São Tomé and Príncipe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe","Other"];
 
 /* ---- Change these to your real details ---- */
 const SHOP = { name: "Slice & Co.", phone: "+233 20 000 0000", email: "help@sliceandco.com", address: "12 Market Street, Accra", hours: "Open daily 10am – 11pm" };
+const telHref = "tel:" + SHOP.phone.replace(/[^\d+]/g, "");
 
 const TYPE_ICON = { base: "🍞", sauce: "🥫", cheese: "🧀", veggie: "🥬", packaging: "📦", drink: "🥤", side: "🍟", supply: "🧴", other: "📝" };
 const NAME_ICON = { Mushroom: "🍄", Onion: "🧅", "Bell Pepper": "🫑", Olives: "🫒", Sweetcorn: "🌽", Tomato: "🍅", "Tomato Basil": "🍅", BBQ: "🍖", Pesto: "🌿", "White Garlic": "🧄", "Spicy Arrabbiata": "🌶️", "Cheese Burst": "🧀", "Gluten Free": "🌾", "Whole Wheat": "🌾" };
@@ -108,10 +111,27 @@ function IngImg({ item, cls }) {
 }
 
 /* ---------- Header / Footer ---------- */
-function Header({ user, cartCount, logout }) {
+function Header({ user, cartCount, logout, theme, toggleTheme }) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+  useEffect(() => {
+    if (!open) return;
+    const k = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [open]);
+
+  // [link, icon, label] used by the side menu
+  const links = user
+    ? [["#dashboard", "🍕", "Menu"], ["#build", "🛠️", "Build your pizza"], ["#favourites", "❤️", "Favourites"], ["#orders", "📦", "Orders"], ["#offers", "🏷️", "Special offers"], ["#account", "👤", "My account"], ["#support", "💬", "Support"], ["#cart", "🛒", "Cart"]]
+    : [["#support", "💬", "Support"], ["#login", "🔑", "Log in"], ["#register", "📝", "Sign up"]];
+
   return (
     <header className="top">
-      <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
+      <div className="brand">
+        <button className="burger" onClick={() => setOpen(true)} aria-label="Open menu">☰</button>
+        <a className="logo" href={user ? "#dashboard" : "#login"}>🍕 Slice <span>&amp; Co.</span></a>
+      </div>
       <nav>
         {user ? (
           <>
@@ -130,7 +150,252 @@ function Header({ user, cartCount, logout }) {
           </>
         )}
       </nav>
+
+      {/* Side menu (the ☰ button) */}
+      <div className={"drawer-bg" + (open ? " open" : "")} onClick={close} />
+      <aside className={"drawer" + (open ? " open" : "")} aria-hidden={!open}>
+        <div className="drawer-top">
+          <a className="logo" href={user ? "#dashboard" : "#login"} onClick={close}>🍕 Slice <span>&amp; Co.</span></a>
+          <button className="drawer-x" onClick={close} aria-label="Close menu">✕</button>
+        </div>
+        {user && <p className="drawer-hi">Hi, {user} 👋</p>}
+        <div className="drawer-links">
+          {links.map(([href, icon, label]) => (
+            <a key={href} href={href} onClick={close}>
+              <span className="di">{icon}</span>{label}
+              {href === "#cart" && <span className="badge">{cartCount}</span>}
+            </a>
+          ))}
+          <a href={telHref} onClick={close}><span className="di">📞</span>Call us</a>
+          <button className="drawer-theme" onClick={toggleTheme}>
+            <span className="di">{theme === "dark" ? "☀️" : "🌙"}</span>{theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
+        </div>
+        {user && <button className="btn full" onClick={() => { close(); logout(); }}>Log out</button>}
+      </aside>
     </header>
+  );
+}
+
+/* ---------- Floating cart (drag it anywhere, it snaps to the left or right edge) ---------- */
+function FloatingCart({ cart, setCart, opts }) {
+  const SIZE = 58, GAP = 8;
+  const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+  const fit = (p) => ({ x: clamp(p.x, GAP, window.innerWidth - SIZE - GAP), y: clamp(p.y, GAP, window.innerHeight - SIZE - GAP) });
+  const snap = (p) => ({ x: p.x + SIZE / 2 < window.innerWidth / 2 ? GAP : window.innerWidth - SIZE - GAP, y: p.y });
+
+  const [pos, setPos] = useState(() => {
+    const saved = readJSON("pizza_cart_pos", null);
+    return fit(saved && typeof saved.x === "number" && typeof saved.y === "number" ? saved : { x: window.innerWidth - SIZE - GAP, y: 130 });
+  });
+  const [open, setOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [bump, setBump] = useState(false);
+  const cur = useRef(pos);
+  cur.current = pos;
+  const drag = useRef(null);
+  const skipClick = useRef(false);
+  const prevCount = useRef(cart.length);
+
+  // little "pop" when a pizza is added
+  useEffect(() => {
+    const grew = cart.length > prevCount.current;
+    prevCount.current = cart.length;
+    if (!grew) return;
+    setBump(true);
+    const t = setTimeout(() => setBump(false), 500);
+    return () => clearTimeout(t);
+  }, [cart.length]);
+
+  // keep the button on screen when the phone rotates / window resizes
+  useEffect(() => {
+    const onResize = () => setPos((p) => snap(fit(p)));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const down = (e) => {
+    drag.current = { sx: e.clientX, sy: e.clientY, ox: cur.current.x, oy: cur.current.y, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+    if (!d.moved && Math.hypot(dx, dy) < 6) return; // small wiggle = a tap, not a drag
+    if (!d.moved) { d.moved = true; setDragging(true); setOpen(false); }
+    setPos(fit({ x: d.ox + dx, y: d.oy + dy }));
+  };
+  const up = () => {
+    const d = drag.current;
+    drag.current = null;
+    setDragging(false);
+    if (d && d.moved) {
+      const s = snap(cur.current);
+      setPos(s);
+      saveJSON("pizza_cart_pos", s);
+      skipClick.current = true; // the click that follows a drag must not open the cart
+      setTimeout(() => { skipClick.current = false; }, 60);
+    }
+  };
+  const click = () => {
+    if (skipClick.current) { skipClick.current = false; return; }
+    setOpen((o) => !o);
+  };
+
+  // group identical pizzas so they show as one line with a quantity
+  const groups = [];
+  cart.forEach((p, i) => {
+    const k = [p.name, p.size || "R", p.labels || ""].join("|");
+    let g = groups.find((x) => x.k === k);
+    if (!g) { g = { k, p, idx: [] }; groups.push(g); }
+    g.idx.push(i);
+  });
+  const plus = (g) => setCart([...cart, { ...g.p }]);
+  const minus = (g) => { const last = g.idx[g.idx.length - 1]; setCart(cart.filter((_, x) => x !== last)); };
+  const removeAll = (g) => setCart(cart.filter((_, x) => !g.idx.includes(x)));
+
+  const total = cart.reduce((a, p) => a + priceFor(opts, p), 0);
+  const onRight = pos.x > window.innerWidth / 2;
+  const below = pos.y < window.innerHeight / 2;
+  const popStyle = {
+    [onRight ? "right" : "left"]: GAP + 4,
+    ...(below ? { top: pos.y + SIZE + 10 } : { bottom: window.innerHeight - pos.y + 10 }),
+  };
+
+  return (
+    <>
+      {open && (
+        <div className="fpop" style={popStyle}>
+          <div className="fp-head"><b>Your cart ({cart.length})</b><button onClick={() => setOpen(false)} aria-label="Close cart">✕</button></div>
+          {!cart.length ? (
+            <>
+              <p className="muted" style={{ margin: "10px 0 14px" }}>Your cart is empty.</p>
+              <button className="btn full" onClick={() => { setOpen(false); go("dashboard"); }}>Browse pizzas</button>
+            </>
+          ) : (
+            <>
+              <div className="fp-list">
+                {groups.map((g) => (
+                  <div className="fp-row" key={g.k}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <b>{g.p.name}</b>
+                      <div className="muted">{sizeOf(opts, g.p.size || "R").label} · {$(priceFor(opts, g.p))} each</div>
+                    </div>
+                    <div className="qty">
+                      <button onClick={() => minus(g)} aria-label={"One less " + g.p.name}>−</button>
+                      <span>{g.idx.length}</span>
+                      <button onClick={() => plus(g)} aria-label={"One more " + g.p.name}>+</button>
+                    </div>
+                    <button className="fp-rm" onClick={() => removeAll(g)} aria-label={"Remove " + g.p.name}>🗑️</button>
+                  </div>
+                ))}
+              </div>
+              <div className="row fp-total"><b>Total</b><span className="price">{$(total)}</span></div>
+              <button className="btn full" onClick={() => { setOpen(false); go("cart"); }}>Go to checkout</button>
+            </>
+          )}
+        </div>
+      )}
+      <button
+        className={"fcart" + (dragging ? " drag" : "") + (bump ? " bump" : "")}
+        style={{ left: pos.x, top: pos.y }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        onClick={click}
+        aria-label={"Cart, " + cart.length + " items. Drag to move."}
+      >
+        🛒{cart.length > 0 && <span className="fc-n">{cart.length}</span>}
+      </button>
+    </>
+  );
+}
+
+/* ---------- Favourites / Offers / My account ---------- */
+// Edit these cards to match your real deals. They are display-only:
+// a real discount must also be applied by the backend, or customers will be charged the normal price.
+const OFFERS = [
+  { icon: "🍕", title: "Build your own", text: "Pick any base, sauce and cheese, then add as many vegetables as you like.", link: "build", cta: "Start building" },
+  { icon: "🌱", title: "Vegan & gluten-free", text: "Choose Vegan Cheese or a Gluten Free base in the pizza builder.", link: "build", cta: "Try it" },
+  { icon: "🚚", title: "Fast delivery", text: "Most orders arrive in 30–45 minutes. Track yours live under Orders.", link: "dashboard", cta: "Order now" },
+];
+
+function Favourites({ opts, addToCart, favs, toggleFav }) {
+  const list = opts.varieties.filter((v) => favs.includes(v.name));
+  return (
+    <div className="wrap wide">
+      <h2>❤️ My favourites</h2>
+      {!list.length && (
+        <>
+          <p className="empty">No favourites yet. Tap the 🤍 on any pizza to save it here.</p>
+          <button className="btn full" onClick={() => go("dashboard")}>Browse pizzas</button>
+        </>
+      )}
+      <div className="grid">
+        {list.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={true} toggleFav={toggleFav} />)}
+      </div>
+    </div>
+  );
+}
+
+function Offers() {
+  return (
+    <div className="wrap">
+      <h2>🏷️ Special offers</h2>
+      {!OFFERS.length && <p className="empty">No offers right now. Check back soon!</p>}
+      {OFFERS.map((o) => (
+        <div className="card offer" key={o.title}>
+          <div className="oicon">{o.icon}</div>
+          <div style={{ flex: 1 }}>
+            <b>{o.title}</b>
+            <p className="muted">{o.text}</p>
+            <button className="btn" style={{ marginTop: 8 }} onClick={() => go(o.link)}>{o.cta}</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Account({ user, theme, toggleTheme, favs }) {
+  const [addrs, setAddrs] = useState(() => readJSON("pizza_addresses", []));
+  const [perm, setPerm] = useState(() => ("Notification" in window ? Notification.permission : "unsupported"));
+  const removeAddr = (i) => { const l = addrs.filter((_, x) => x !== i); setAddrs(l); saveJSON("pizza_addresses", l); };
+  const ask = () => { try { Notification.requestPermission().then(setPerm); } catch (e) {} };
+  return (
+    <div className="wrap">
+      <h2>👤 My account</h2>
+      <div className="card">
+        <div className="row"><b>Name</b><span>{user}</span></div>
+        <div className="row" style={{ marginTop: 10 }}><b>Favourites</b><a href="#favourites">{favs.length} saved →</a></div>
+      </div>
+
+      <div className="card">
+        <div className="row">
+          <b>{theme === "dark" ? "🌙 Dark mode" : "☀️ Light mode"}</b>
+          <button className="btn ghost" onClick={toggleTheme}>Switch to {theme === "dark" ? "light" : "dark"}</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <b>🔔 Order notifications</b>
+        <p className="muted" style={{ margin: "6px 0 10px" }}>Get an alert when your order moves to the kitchen or goes out for delivery (while the site is open).</p>
+        {perm === "granted" && <p className="msg ok">Notifications are on.</p>}
+        {perm === "denied" && <p className="muted">Notifications are blocked. Allow them in your browser's site settings.</p>}
+        {perm === "unsupported" && <p className="muted">This browser doesn't support notifications. You will still see an alert on the page.</p>}
+        {perm === "default" && <button className="btn" onClick={ask}>Turn on notifications</button>}
+      </div>
+
+      <h2 style={{ marginTop: 18 }}>📍 Saved addresses</h2>
+      {!addrs.length && <p className="muted">None yet. In your cart, tap "Save this address" to keep one here.</p>}
+      {addrs.map((a, i) => (
+        <div className="card row" key={i}>
+          <span className="muted" style={{ flex: 1 }}>{place(a)}{a.phone ? " · " + a.phone : ""}</span>
+          <button className="btn ghost" onClick={() => removeAddr(i)}>Remove</button>
+        </div>
+      ))}
+
+      <p className="muted" style={{ marginTop: 14 }}>Favourites, addresses and ratings are saved on this device.</p>
+    </div>
   );
 }
 
@@ -144,7 +409,7 @@ function Footer() {
         </div>
         <div>
           <h4>Customer service</h4>
-          <p>📞 {SHOP.phone}</p>
+          <p>📞 <a href={telHref}>{SHOP.phone}</a></p>
           <p>✉️ {SHOP.email}</p>
           <p>📍 {SHOP.address}</p>
           <p>🕗 {SHOP.hours}</p>
@@ -356,13 +621,50 @@ function Reset({ token }) {
 }
 
 /* ---------- Menu ---------- */
-function PizzaCard({ v, opts, addToCart }) {
+/* ---------- Videos (put the files in frontend/videos/) ---------- */
+// Homepage background: someone packaging pizza. Set to "" to turn it off.
+const HERO_VIDEO = "videos/packaging.mp4";
+// "Inside our kitchen" clips on the menu page. Add, remove or rename as you like. A missing file is simply skipped.
+const KITCHEN_CLIPS = [
+  { src: "videos/chef-dough.mp4", title: "Fresh dough, made by hand" },
+  { src: "videos/chef-toppings.mp4", title: "Toppings added with care" },
+  { src: "videos/chef-oven.mp4", title: "Baked hot to order" },
+];
+const REDUCE_MOTION = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// A silent, looping video that only plays while it is on screen (saves data and battery).
+function LoopVideo({ src, cls, onBad }) {
+  const ref = useRef(null);
+  const [bad, setBad] = useState(false);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { const p = v.play(); if (p && p.catch) p.catch(() => {}); } else v.pause(); }, { threshold: 0.35 });
+    io.observe(v);
+    return () => io.disconnect();
+  }, [bad]);
+  if (bad) return null;
+  return <video ref={ref} className={cls} src={src} muted loop playsInline autoPlay preload="metadata" onError={() => { setBad(true); if (onBad) onBad(); }} />;
+}
+
+function KitchenClip({ src, title }) {
+  const [bad, setBad] = useState(false);
+  if (bad) return null;
+  return (
+    <figure className="kclip">
+      <LoopVideo src={src} cls="kvid" onBad={() => setBad(true)} />
+      <figcaption>{title}</figcaption>
+    </figure>
+  );
+}
+
+function PizzaCard({ v, opts, addToCart, fav, toggleFav }) {
   const [size, setSize] = useState("R");
   return (
     <div className="pcard">
       <Photo src={imgFor(v.name)} alt={v.name} />
       <div className="pbody">
-        <div className="row"><b>{v.name}</b><span className="price">{$(priceFor(opts, v, size))}</span></div>
+        <div className="row"><b>{v.name}</b><span>{toggleFav && <button className="heart" onClick={() => toggleFav(v.name)} aria-label={fav ? "Remove from favourites" : "Save to favourites"}>{fav ? "❤️" : "🤍"}</button>} <span className="price">{$(priceFor(opts, v, size))}</span></span></div>
         <p className="muted">{v.desc}</p>
         <p className="muted">{v.labels}</p>
         <SizePicker opts={opts} value={size} onChange={setSize} base={v.price} minStock={v.minStock} />
@@ -372,10 +674,11 @@ function PizzaCard({ v, opts, addToCart }) {
   );
 }
 
-function Menu({ opts, addToCart, name }) {
+function Menu({ opts, addToCart, name, favs = [], toggleFav }) {
   return (
     <div>
       <div className="hero" style={{ backgroundImage: "url(" + window.HERO_IMG + ")" }}>
+        {HERO_VIDEO && !REDUCE_MOTION && <LoopVideo src={HERO_VIDEO} cls="hero-video" />}
         <h1>Hot, fresh pizza<br />at <em>your door</em></h1>
         <p>Welcome{name ? ", " + name : ""}! Pick a favourite or build your own.</p>
         <div className="btns">
@@ -393,9 +696,15 @@ function Menu({ opts, addToCart, name }) {
           <div><b>💳</b><strong>2. Pay</strong>Secure card checkout</div>
           <div><b>🛵</b><strong>3. Track</strong>Watch it go from kitchen to door</div>
         </div>
+        {KITCHEN_CLIPS.length > 0 && (
+          <>
+            <h2>👨‍🍳 Inside our kitchen</h2>
+            <div className="kitchen">{KITCHEN_CLIPS.map((k) => <KitchenClip key={k.src} src={k.src} title={k.title} />)}</div>
+          </>
+        )}
         <h2>Our pizzas</h2>
         <div className="grid">
-          {opts.varieties.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} />)}
+          {opts.varieties.map((v) => <PizzaCard key={v.name} v={v} opts={opts} addToCart={addToCart} fav={favs.includes(v.name)} toggleFav={toggleFav} />)}
         </div>
         <button className="btn alt full" style={{ marginTop: 20 }} onClick={() => go("build")}>🍕 Build your own pizza</button>
       </div>
@@ -467,6 +776,15 @@ function Cart({ cart, setCart, opts }) {
     catch (e) { return blank; }
   });
   const setField = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  const [saved, setSaved] = useState(() => readJSON("pizza_addresses", []));
+  const saveAddr = () => {
+    if (d.area.trim().length < 2 || d.address.trim().length < 5) return setMsg({ ok: false, text: "Fill in your city/area and address first." });
+    const entry = { country: d.country, area: d.area, address: d.address, phone: d.phone };
+    const list = [entry, ...saved.filter((a) => !(a.address === entry.address && a.area === entry.area))].slice(0, 5);
+    setSaved(list); saveJSON("pizza_addresses", list);
+    setMsg({ ok: true, text: "Address saved." });
+  };
+  const fillAddr = (i) => { if (i === "") return; const a = saved[+i]; setD({ ...d, country: a.country || "", area: a.area || "", address: a.address || "", phone: a.phone || d.phone }); };
   const total = cart.reduce((a, p) => a + priceFor(opts, p), 0);
 
   const pay = () => {
@@ -503,6 +821,15 @@ function Cart({ cart, setCart, opts }) {
 
       <h2 style={{ marginTop: 18 }}>📍 Delivery location</h2>
       <div className="card">
+        {saved.length > 0 && (
+          <>
+            <label className="muted">Use a saved address</label>
+            <select value="" onChange={(e) => fillAddr(e.target.value)}>
+              <option value="">Choose...</option>
+              {saved.map((a, i) => <option key={i} value={i}>{[a.address, a.area].filter(Boolean).join(", ")}</option>)}
+            </select>
+          </>
+        )}
         <label className="muted">Country</label>
         <select value={d.country} onChange={setField("country")}>
           <option value="">Choose your country...</option>
@@ -516,6 +843,7 @@ function Cart({ cart, setCart, opts }) {
         <input type="tel" placeholder="e.g. +233 24 000 0000" value={d.phone} onChange={setField("phone")} />
         <label className="muted">Note for the rider (optional)</label>
         <input placeholder="e.g. Call when you arrive" value={d.note} onChange={setField("note")} />
+        <button type="button" className="btn ghost full" onClick={saveAddr}>💾 Save this address</button>
       </div>
 
       <button className="btn full" disabled={busy} onClick={pay}>{busy ? "Opening payment..." : "Pay with Stripe (test mode)"}</button>
@@ -526,9 +854,31 @@ function Cart({ cart, setCart, opts }) {
 }
 
 /* ---------- My orders ---------- */
-function Orders() {
+function Orders({ opts, addToCart }) {
   const [orders, setOrders] = useState(null);
   const [err, setErr] = useState(null);
+  const [ratings, setRatings] = useState(() => readJSON("pizza_ratings", {}));
+  const rate = (id, n) => { const r = { ...ratings, [id]: n }; setRatings(r); saveJSON("pizza_ratings", r); };
+  const reorder = (o) => {
+    const found = (type, n) => opts[type].find((i) => i.name === n);
+    let added = 0, missed = 0;
+    o.pizzas.forEach((p) => {
+      const sz = sizeList(opts).find((x) => x.label === p.sizeLabel) || sizeList(opts)[0];
+      const v = opts.varieties.find((x) => x.name === p.name);
+      if (v) { if (v.soldOut) missed++; else { addToCart({ ...v, size: sz.key }); added++; } return; }
+      const b = found("base", p.base), sa = found("sauce", p.sauce), c = found("cheese", p.cheese);
+      const vs = (p.veggies || []).map((n) => found("veggie", n));
+      if (!b || !sa || !c || vs.some((x) => !x)) { missed++; return; }
+      addToCart({
+        name: "Custom Pizza", size: sz.key, base: b.id, sauce: sa.id, cheese: c.id, veggies: vs.map((x) => x.id),
+        labels: [b.name, sa.name, c.name, ...vs.map((x) => x.name)].join(", "),
+        price: +(4 + b.price + sa.price + c.price + vs.reduce((a, x) => a + x.price, 0)).toFixed(2),
+      });
+      added++;
+    });
+    if (added) go("cart");
+    else setErr({ ok: false, text: "Sorry, those items are not available right now." });
+  };
   useEffect(() => {
     const load = () => call("/api/orders/mine").then(setOrders).catch((e) => setErr({ ok: false, text: e.message }));
     load();
@@ -551,6 +901,13 @@ function Orders() {
             {o.status === "Cancelled"
               ? <p className="cancelled">❌ This order was cancelled{o.refundedAt ? ". Your payment has been refunded; your bank may take a few days to show it." : ". If you were charged, please contact us."}</p>
               : <div className="track">{STATUSES.map((s, i) => <span key={s} className={i <= idx ? "on" : ""}>{s}</span>)}</div>}
+            {o.status === "Sent to Delivery" && (
+              <div className="rate">
+                <span className="muted">{ratings[o._id] ? "Your rating:" : "Rate this order:"}</span>
+                {[1, 2, 3, 4, 5].map((n) => <button key={n} className={n <= (ratings[o._id] || 0) ? "on" : ""} onClick={() => rate(o._id, n)} aria-label={n + " stars"}>★</button>)}
+              </div>
+            )}
+            {o.status !== "Cancelled" && opts && <button className="btn ghost full" style={{ marginTop: 10 }} onClick={() => reorder(o)}>🔁 Reorder</button>}
           </div>
         );
       })}
@@ -996,6 +1353,36 @@ function App() {
   const [cart, setCart] = useState([]);
   const [opts, setOpts] = useState(null);
   const [banner, setBanner] = useState(null);
+  const [favs, setFavs] = useState(() => readJSON("pizza_favs", []));
+  const [theme, setTheme] = useState(() => readJSON("pizza_theme", "light"));
+  const toggleFav = (n) => setFavs((f) => { const l = f.includes(n) ? f.filter((x) => x !== n) : [...f, n]; saveJSON("pizza_favs", l); return l; });
+  const toggleTheme = () => setTheme((t) => { const n = t === "dark" ? "light" : "dark"; saveJSON("pizza_theme", n); return n; });
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+
+  // alert the customer when an order's status changes (checks every 20 seconds while the site is open)
+  const seen = useRef(null);
+  useEffect(() => {
+    if (!user) { seen.current = null; return; }
+    let stop = false;
+    const check = () => call("/api/orders/mine").then((list) => {
+      if (stop || !Array.isArray(list)) return;
+      const now = {};
+      list.forEach((o) => { now[o._id] = o.status; });
+      if (seen.current) {
+        list.forEach((o) => {
+          if (seen.current[o._id] && seen.current[o._id] !== o.status) {
+            const text = o.status === "Cancelled" ? "Your order was cancelled." : "Your order is now: " + o.status;
+            setBanner({ ok: o.status !== "Cancelled", text });
+            try { if ("Notification" in window && Notification.permission === "granted") new Notification("Slice & Co.", { body: text }); } catch (e) {}
+          }
+        });
+      }
+      seen.current = now;
+    }).catch(() => {});
+    check();
+    const t = setInterval(check, 20000);
+    return () => { stop = true; clearInterval(t); };
+  }, [user]);
 
   useEffect(() => {
     if (user) call("/api/orders/options").then(setOpts).catch((e) => setBanner({ ok: false, text: e.message }));
@@ -1040,17 +1427,21 @@ function App() {
   } else if (!opts) page = <p className="empty">Loading menu (the server may be waking up)...</p>;
   else if (route === "build") page = <Builder opts={opts} addToCart={addToCart} />;
   else if (route === "cart") page = <Cart cart={cart} setCart={setCart} opts={opts} />;
-  else if (route === "orders") page = <Orders />;
-  else page = <Menu opts={opts} addToCart={addToCart} name={user} />;
+  else if (route === "orders") page = <Orders opts={opts} addToCart={addToCart} />;
+  else if (route === "favourites") page = <Favourites opts={opts} addToCart={addToCart} favs={favs} toggleFav={toggleFav} />;
+  else if (route === "offers") page = <Offers />;
+  else if (route === "account") page = <Account user={user} theme={theme} toggleTheme={toggleTheme} favs={favs} />;
+  else page = <Menu opts={opts} addToCart={addToCart} name={user} favs={favs} toggleFav={toggleFav} />;
 
   const isAdmin = route === "admin";
   return (
     <div>
-      {!isAdmin && <Header user={user} cartCount={cart.length} logout={logout} />}
+      {!isAdmin && <Header user={user} cartCount={cart.length} logout={logout} theme={theme} toggleTheme={toggleTheme} />}
       {banner && <div className="toast"><Msg m={banner} /></div>}
       {page}
       {!isAdmin && <Footer />}
       {!isAdmin && <Chatbot />}
+      {!isAdmin && user && opts && route !== "cart" && <FloatingCart cart={cart} setCart={setCart} opts={opts} />}
     </div>
   );
 }
