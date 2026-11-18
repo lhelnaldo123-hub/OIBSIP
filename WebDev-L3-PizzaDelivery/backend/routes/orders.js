@@ -4,6 +4,8 @@ const { auth } = require("../auth");
 const { checkLowStock, getStripe } = require("../jobs");
 const { reserve, releaseOrder, finalizePaid } = require("../stock");
 const { VARIETIES } = require("../varieties");
+const { SIZES, sizeOf } = require("../sizes");
+const { STOCK_ONLY_TYPES } = require("../models");
 
 const front = () => (process.env.FRONTEND_URL || "").replace(/\/$/, "");
 const money = (n) => Math.round(n * 100) / 100;
@@ -26,9 +28,10 @@ router.get("/options", async (req, res) => {
         labels: [v.base, v.sauce, v.cheese, ...v.veggies].join(", "),
         price: money(PRICE_BASE + b.price + s.price + c.price + vs.reduce((a, x) => a + x.price, 0)),
         soldOut: [b, s, c, ...vs].some((x) => x.stock <= 0),
+        minStock: Math.min(...[b, s, c, ...vs].map((x) => x.stock)),
       };
     }).filter(Boolean);
-    res.json({ base: group("base"), sauce: group("sauce"), cheese: group("cheese"), veggie: group("veggie"), varieties });
+    res.json({ base: group("base"), sauce: group("sauce"), cheese: group("cheese"), veggie: group("veggie"), varieties, sizes: SIZES.map(({ key, label, mult, portions }) => ({ key, label, mult, portions })) });
   } catch (e) {
     res.status(500).json({ error: "Could not load menu" });
   }
@@ -36,9 +39,12 @@ router.get("/options", async (req, res) => {
 
 async function priceOrder(pizzas) {
   if (!Array.isArray(pizzas) || pizzas.length === 0 || pizzas.length > 10) throw new Error("Cart is empty or too large");
-  const lines = [], used = {}, names = {};
+  const lines = [], used = {}, names = {}, sizesUsed = [];
   let total = 0;
   for (const p of pizzas) {
+    const size = sizeOf(p.size);
+    if (!size) throw new Error("Invalid pizza size");
+    sizesUsed.push(size.key);
     const veg = [...new Set((Array.isArray(p.veggies) ? p.veggies : []).map(String))];
     const items = await Inventory.find({ _id: { $in: [p.base, p.sauce, p.cheese, ...veg] }, active: { $ne: false } });
     const get = (id, type) => items.find((i) => String(i._id) === String(id) && i.type === type);
@@ -46,11 +52,12 @@ async function priceOrder(pizzas) {
     const vs = veg.map((id) => get(id, "veggie"));
     if (!base || !sauce || !cheese || vs.some((v) => !v)) throw new Error("Invalid pizza choice");
     const picked = [base, sauce, cheese, ...vs];
-    picked.forEach((i) => { used[i._id] = (used[i._id] || 0) + 1; names[i._id] = i; });
-    const price = money(PRICE_BASE + picked.reduce((a, i) => a + i.price, 0));
+    picked.forEach((i) => { used[i._id] = (used[i._id] || 0) + size.portions; names[i._id] = i; });
+    const price = money(money(PRICE_BASE + picked.reduce((a, i) => a + i.price, 0)) * size.mult);
     total += price;
     lines.push({
       name: String(p.name || "Custom Pizza").slice(0, 40),
+      size: size.key, sizeLabel: size.label,
       base: base.name, sauce: sauce.name, cheese: cheese.name,
       veggies: vs.map((v) => v.name), price,
     });
@@ -59,6 +66,14 @@ async function priceOrder(pizzas) {
   for (const id of Object.keys(used)) {
     if (names[id].stock < used[id]) throw new Error("Sorry, not enough " + names[id].name + " in stock");
     usage.push({ item: id, qty: used[id] });
+  }
+  // Packaging and other stock-only items the admin set to be used automatically.
+  // These are "soft": taken as far as stock allows, and they never stop a sale.
+  const auto = await Inventory.find({ type: { $in: STOCK_ONLY_TYPES }, $or: [{ usePerPizza: { $gt: 0 } }, { usePerOrder: { $gt: 0 } }] });
+  for (const it of auto) {
+    const perPizza = sizesUsed.filter((k) => !it.forSize || it.forSize === k).length * (it.usePerPizza || 0);
+    const qty = perPizza + (it.usePerOrder || 0);
+    if (qty > 0) usage.push({ item: it._id, qty, soft: true });
   }
   return { lines, total: money(total), usage };
 }
@@ -93,13 +108,17 @@ router.post("/", auth, async (req, res) => {
       user: user._id, pizzas: lines, usage, delivery, total,
       held: true, reservedUntil: new Date(expiresAt * 1000),
     });
+    let taken;
     try {
-      await reserve(usage, order);
+      taken = await reserve(usage, order);
     } catch (e) {
       await Order.deleteOne({ _id: order._id });
       order = null;
       throw e;
     }
+    // Save what was really taken (packaging may have been short) before talking to Stripe.
+    order.usage = taken;
+    await order.save();
 
     const session = await getStripe().checkout.sessions.create({
       mode: "payment",
