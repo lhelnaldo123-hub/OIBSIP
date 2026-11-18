@@ -1,24 +1,18 @@
 const router = require("express").Router();
 const { Inventory, Order, User } = require("../models");
 const { auth } = require("../auth");
-const { checkLowStock } = require("../jobs");
+const { checkLowStock, getStripe } = require("../jobs");
+const { reserve, releaseOrder, finalizePaid } = require("../stock");
+const { VARIETIES } = require("../varieties");
 
-const getStripe = () => require("stripe")(process.env.STRIPE_SECRET_KEY);
 const front = () => (process.env.FRONTEND_URL || "").replace(/\/$/, "");
 const money = (n) => Math.round(n * 100) / 100;
 const PRICE_BASE = 4;
-
-const VARIETIES = [
-  { name: "Margherita", desc: "Classic tomato and mozzarella", base: "Thin Crust", sauce: "Tomato Basil", cheese: "Mozzarella", veggies: ["Tomato"] },
-  { name: "Farmhouse", desc: "Loaded with fresh vegetables", base: "Thick Crust", sauce: "Tomato Basil", cheese: "Mozzarella", veggies: ["Mushroom", "Onion", "Bell Pepper", "Sweetcorn"] },
-  { name: "BBQ Veggie", desc: "Smoky barbecue and cheddar", base: "Whole Wheat", sauce: "BBQ", cheese: "Cheddar", veggies: ["Onion", "Bell Pepper", "Sweetcorn"] },
-  { name: "Pesto Delight", desc: "Green pesto on a cheese burst base", base: "Cheese Burst", sauce: "Pesto", cheese: "Mozzarella", veggies: ["Olives", "Tomato", "Mushroom"] },
-  { name: "Spicy Garden", desc: "Hot arrabbiata with crunchy veg", base: "Thin Crust", sauce: "Spicy Arrabbiata", cheese: "Cheddar", veggies: ["Bell Pepper", "Olives", "Onion"] },
-];
+const HOLD_MINUTES = 31; // Stripe needs a checkout session to live at least 30 minutes
 
 router.get("/options", async (req, res) => {
   try {
-    const items = await Inventory.find().sort({ name: 1 });
+    const items = await Inventory.find({ active: { $ne: false } }).sort({ name: 1 });
     const find = (type, name) => items.find((i) => i.type === type && i.name === name);
     const group = (type) =>
       items.filter((i) => i.type === type).map((i) => ({ id: i._id, name: i.name, price: i.price, stock: i.stock }));
@@ -31,6 +25,7 @@ router.get("/options", async (req, res) => {
         base: b._id, sauce: s._id, cheese: c._id, veggies: vs.map((x) => x._id),
         labels: [v.base, v.sauce, v.cheese, ...v.veggies].join(", "),
         price: money(PRICE_BASE + b.price + s.price + c.price + vs.reduce((a, x) => a + x.price, 0)),
+        soldOut: [b, s, c, ...vs].some((x) => x.stock <= 0),
       };
     }).filter(Boolean);
     res.json({ base: group("base"), sauce: group("sauce"), cheese: group("cheese"), veggie: group("veggie"), varieties });
@@ -45,7 +40,7 @@ async function priceOrder(pizzas) {
   let total = 0;
   for (const p of pizzas) {
     const veg = [...new Set((Array.isArray(p.veggies) ? p.veggies : []).map(String))];
-    const items = await Inventory.find({ _id: { $in: [p.base, p.sauce, p.cheese, ...veg] } });
+    const items = await Inventory.find({ _id: { $in: [p.base, p.sauce, p.cheese, ...veg] }, active: { $ne: false } });
     const get = (id, type) => items.find((i) => String(i._id) === String(id) && i.type === type);
     const base = get(p.base, "base"), sauce = get(p.sauce, "sauce"), cheese = get(p.cheese, "cheese");
     const vs = veg.map((id) => get(id, "veggie"));
@@ -82,13 +77,30 @@ function cleanDelivery(d) {
   return { country, area, address, phone, note };
 }
 
+// Creating an order takes the stock straight away (a 31 minute hold), so two
+// customers can never buy the last unit. If the order is not paid in time,
+// the reconcile job in jobs.js gives the stock back.
 router.post("/", auth, async (req, res) => {
+  let order = null;
   try {
     const user = await User.findById(req.user.id);
     if (!user || !user.verified) return res.status(403).json({ error: "Verify your email first" });
     const delivery = cleanDelivery((req.body || {}).delivery);
     const { lines, total, usage } = await priceOrder((req.body || {}).pizzas);
-    const order = await Order.create({ user: user._id, pizzas: lines, usage, delivery, total });
+    const expiresAt = Math.floor(Date.now() / 1000) + HOLD_MINUTES * 60;
+
+    order = await Order.create({
+      user: user._id, pizzas: lines, usage, delivery, total,
+      held: true, reservedUntil: new Date(expiresAt * 1000),
+    });
+    try {
+      await reserve(usage, order);
+    } catch (e) {
+      await Order.deleteOne({ _id: order._id });
+      order = null;
+      throw e;
+    }
+
     const session = await getStripe().checkout.sessions.create({
       mode: "payment",
       line_items: [{
@@ -99,14 +111,16 @@ router.post("/", auth, async (req, res) => {
         },
         quantity: 1,
       }],
+      expires_at: expiresAt,
       success_url: `${front()}/?paid=${order._id}&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${front()}/?cancelled=1`,
+      cancel_url: `${front()}/?cancelled=${order._id}`,
       metadata: { orderId: String(order._id) },
     });
     order.stripeSession = session.id;
     await order.save();
     res.status(201).json({ url: session.url });
   } catch (e) {
+    if (order) await releaseOrder(order._id).catch(() => {});
     res.status(400).json({ error: e.message });
   }
 });
@@ -117,21 +131,43 @@ router.post("/confirm", auth, async (req, res) => {
     const order = await Order.findOne({ _id: orderId, user: req.user.id });
     if (!order) return res.status(404).json({ error: "Order not found" });
     if (order.paid) return res.json({ status: order.status });
+    if (order.status === "Expired")
+      return res.status(400).json({ error: "This order expired before payment. If you were charged, please contact us." });
     if (order.stripeSession !== sessionId) return res.status(400).json({ error: "Payment session mismatch" });
     const session = await getStripe().checkout.sessions.retrieve(sessionId);
     if (session.payment_status !== "paid") return res.status(400).json({ error: "Payment not completed" });
-    const done = await Order.findOneAndUpdate(
-      { _id: order._id, paid: false },
-      { paid: true, status: "Order Received" },
-      { new: true }
-    );
+
+    // Orders created before stock holds existed still need their stock taken now (never below zero).
+    const legacy = !order.held && order.status === "Pending Payment";
+    const done = await finalizePaid(order._id);
     if (done) {
-      for (const u of order.usage) await Inventory.updateOne({ _id: u.item }, { $inc: { stock: -u.qty } });
+      if (legacy) {
+        for (const u of order.usage)
+          await Inventory.updateOne({ _id: u.item }, [{ $set: { stock: { $max: [0, { $subtract: ["$stock", u.qty] }] } } }]);
+      }
       checkLowStock().catch(() => {});
     }
     res.json({ status: "Order Received" });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// The customer pressed "back" on the Stripe page: give the held stock back right away.
+router.post("/cancel", auth, async (req, res) => {
+  try {
+    const order = await Order.findOne({ _id: (req.body || {}).orderId, user: req.user.id });
+    if (!order || order.paid || !order.held) return res.json({ released: false });
+    if (order.stripeSession) {
+      try {
+        await getStripe().checkout.sessions.expire(order.stripeSession);
+      } catch (e) {
+        return res.json({ released: false }); // already paid or already closed; the reconcile job settles it
+      }
+    }
+    res.json({ released: await releaseOrder(order._id) });
+  } catch (e) {
+    res.json({ released: false });
   }
 });
 
