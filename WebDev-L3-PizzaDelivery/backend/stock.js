@@ -44,15 +44,42 @@ async function adjust(id, change, meta = {}) {
 }
 
 /**
- * Reserve stock for an unpaid order. All items or none: if one item is short,
- * the ones already taken are put back and the error is thrown.
+ * Take up to `qty` of an item for packaging-type usage. It never blocks a sale and never goes
+ * below zero: if only 3 boxes are left and 4 are wanted, 3 are taken. Returns how many were taken.
+ */
+async function takeSoft(id, qty, meta) {
+  for (let tries = 0; tries < 5; tries++) {
+    const item = await Inventory.findById(id);
+    if (!item) return 0;
+    const n = Math.min(Math.max(item.stock || 0, 0), qty);
+    if (n <= 0) return 0;
+    try {
+      await adjust(id, -n, meta);
+      return n;
+    } catch (e) {
+      // someone else took stock at the same moment: look again
+    }
+  }
+  return 0;
+}
+
+/**
+ * Reserve stock for an unpaid order.
+ * Ingredients (not soft) are all-or-nothing: if one is short, the ones already taken are put back
+ * and the error is thrown. Packaging (soft) is taken as far as stock allows and never blocks the order.
+ * Returns the usage that was really taken, so releasing or cancelling later gives back exactly that.
  */
 async function reserve(usage, order) {
   const taken = [];
+  const meta = { reason: "order", note: "Order " + shortId(order._id), by: "customer order", order: order._id };
   try {
-    for (const u of usage) {
-      await adjust(u.item, -u.qty, { reason: "order", note: "Order " + shortId(order._id), by: "customer order", order: order._id });
-      taken.push(u);
+    for (const u of usage.filter((x) => !x.soft)) {
+      await adjust(u.item, -u.qty, meta);
+      taken.push({ item: u.item, qty: u.qty });
+    }
+    for (const u of usage.filter((x) => x.soft)) {
+      const n = await takeSoft(u.item, u.qty, meta);
+      if (n > 0) taken.push({ item: u.item, qty: n, soft: true });
     }
   } catch (e) {
     for (const u of taken) {
@@ -60,6 +87,7 @@ async function reserve(usage, order) {
     }
     throw e;
   }
+  return taken;
 }
 
 /**
@@ -93,4 +121,24 @@ async function finalizePaid(orderId) {
   return !!done;
 }
 
-module.exports = { LIMIT, levelOf, adjust, reserve, releaseOrder, finalizePaid, shortId };
+/**
+ * Cancel a PAID order. Marks it Cancelled once (safe to call twice: only the first call acts).
+ * If restock is true the ingredients and packaging it used go back into stock.
+ * Returns the cancelled order, or null if it was not paid or was already cancelled.
+ */
+async function cancelPaidOrder(orderId, { restock, note, by }) {
+  const order = await Order.findOneAndUpdate(
+    { _id: orderId, paid: true, status: { $ne: "Cancelled" } },
+    { status: "Cancelled", cancelledAt: new Date(), cancelNote: String(note || "").slice(0, 200) },
+    { new: true }
+  );
+  if (!order) return null;
+  if (restock) {
+    for (const u of order.usage) {
+      await adjust(u.item, u.qty, { reason: "order-cancelled", note: "Order " + shortId(order._id) + " cancelled", by: by || "admin", order: order._id }).catch((e) => console.error("Restock failed:", e.message));
+    }
+  }
+  return order;
+}
+
+module.exports = { LIMIT, levelOf, adjust, takeSoft, reserve, releaseOrder, finalizePaid, cancelPaidOrder, shortId };
